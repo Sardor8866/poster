@@ -258,15 +258,22 @@ if __name__ == '__main__':
     print("✅ Первый пост отправлен")
     
     # 3. Устанавливаем вебхук
-    try:
+   # СТАЛО:
+try:
+    # Проверяем что токен вообще есть
+    if not TOKEN:
+        print("❌ Токен не найден! Проверь Environment Variables")
+    else:
         render_url = os.environ.get('RENDER_EXTERNAL_URL')
         if render_url:
             bot.remove_webhook()
             webhook_url = f"{render_url}/webhook"
             bot.set_webhook(url=webhook_url)
             print(f"✅ Вебхук установлен: {webhook_url}")
-    except Exception as e:
-        print(f"⚠️ Вебхук: {e}")
+        else:
+            print("ℹ️ RENDER_EXTERNAL_URL не найден, вебхук не установлен")
+except Exception as e:
+    print(f"⚠️ Вебхук ошибка: {e}")
     
     # 4. Запускаем Flask
     print(f"🌐 Flask запущен на порту {PORT}")
