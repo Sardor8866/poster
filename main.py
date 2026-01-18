@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import Flask
 
 # ========== КОНФИГ ==========
-TOKEN = os.getenv('8430523428:AAGn0c_B4Olu3WWIsw54If3HciGHci23yKo') or "8430523428:AAgn0c_B401u3WiSw54I13Hc1GhC123yKo"
+TOKEN = os.getenv('8367850036:AAFlwAwCeCMG1fC8e1kT1pUuFCZtC1Zis4A') or "8367850036:AAFlwAwCeCMG1fC8e1kT1pUuFCZtC1Zis4A"
 CHANNEL = "@hweywewr"  # ЗАМЕНИ НА СВОЙ КАНАЛ!
 POST_INTERVAL = 4  # минуты (4 для надежности)
 PORT = int(os.environ.get('PORT', 10000))
