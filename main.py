@@ -9,11 +9,20 @@ import random
 import string
 import re
 import html
+from flask import Flask, request, jsonify
 from channel import WithdrawalChannel  # Импортируем модуль канала
 
-# Настройки бота
+# ========== НАСТРОЙКИ ==========
 TOKEN = "8337396229:AAES7rHlibutnscXOHk7t6XB2fK2CUni5eE"
+WEBHOOK_URL = "https://poster-x4jl.onrender.com"  # ⚠️ ЗАМЕНИ на свой URL!
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
+PORT = 8080
+
+# Инициализация бота
 bot = telebot.TeleBot(TOKEN, parse_mode='HTML')
+
+# Инициализация Flask приложения
+app = Flask(__name__)
 
 # Инициализация канала для уведомлений
 withdrawal_channel = WithdrawalChannel(TOKEN)
@@ -39,26 +48,26 @@ def sanitize_text(text):
     """Очистка текста от проблемных символов"""
     if not text:
         return ""
-    
+
     # Удаляем непечатаемые символы
     text = ''.join(char for char in text if char.isprintable())
-    
+
     # Заменяем проблемные HTML-сущности
     text = html.escape(text)
-    
+
     # Удаляем лишние пробелы
     text = ' '.join(text.split())
-    
+
     return text
 
 def format_html(text):
     """Безопасное форматирование HTML"""
     if not text:
         return ""
-    
+
     # Экранируем HTML
     text = html.escape(text)
-    
+
     # Разрешаем только безопасные теги
     allowed_tags = {
         'b': 'b',
@@ -74,10 +83,10 @@ def format_html(text):
         'pre': 'pre',
         'a': 'a'
     }
-    
+
     # Простая очистка от неразрешенных тегов
     text = re.sub(r'</?(?!b|strong|i|em|u|ins|s|strike|del|code|pre|a\b)[^>]+>', '', text)
-    
+
     return text
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С КАНАЛАМИ ==========
@@ -120,23 +129,23 @@ def check_subscription_required(user_id):
     else:
         # Формируем сообщение с ВСЕМИ каналами и ссылками
         all_items = get_all_items_for_user()
-        
+
         channels_text = "📺 <b>ПОДПИШИТЕСЬ НА КАНАЛЫ</b>\n\n"
-        
+
         # Показываем сначала обязательные каналы
         if REQUIRED_CHANNELS:
             channels_text += "<b>Обязательные для подписки (проверяются):</b>\n"
             for channel in REQUIRED_CHANNELS:
                 safe_name = sanitize_text(channel['channel_name'])
                 channels_text += f"• {safe_name} 📌\n"
-        
+
         # Затем показываем простые ссылки
         if SIMPLE_LINKS:
             channels_text += "\n<b>Рекомендуем подписаться:</b>\n"
             for link_item in SIMPLE_LINKS:
                 safe_name = sanitize_text(link_item['channel_name'])
                 channels_text += f"• {safe_name} 🔗\n"
-        
+
         channels_text += "\n✅ <b>Подпишитесь на обязательные каналы (отмечены 📌) и нажмите кнопку 'Проверить подписку'</b>"
 
         keyboard = types.InlineKeyboardMarkup()
@@ -420,13 +429,13 @@ def check_subscription_after_callback(call):
             parse_mode='HTML',
             reply_markup=create_main_menu()
         )
-        
+
         # Проверяем и начисляем реферальные бонусы
         check_and_award_referral_bonus(user_id)
     else:
         # Показываем все каналы снова
         all_items = get_all_items_for_user()
-        
+
         channels_text = "❌ <b>Вы еще не подписались на все обязательные каналы!</b>\n\n"
         channels_text += "Осталось подписаться на обязательные каналы:\n\n"
 
@@ -436,7 +445,7 @@ def check_subscription_after_callback(call):
         for channel in REQUIRED_CHANNELS:
             safe_name = sanitize_text(channel['channel_name'])
             channels_text += f"• {safe_name} 📌\n"
-            
+
             if 'channel_username' in channel and channel['channel_username']:
                 username = channel['channel_username'].replace('@', '')
                 if username:
@@ -485,23 +494,23 @@ def check_and_award_referral_bonus(user_id):
     """Проверяет и начисляет реферальные бонусы после подписки на все каналы"""
     conn = sqlite3.connect('referral_bot.db', check_same_thread=False)
     cursor = conn.cursor()
-    
+
     # Получаем информацию о пользователе
     cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
     result = cursor.fetchone()
-    
+
     if result and result[0]:  # Если у пользователя есть реферер
         referrer_id = result[0]
-        
+
         # Проверяем, были ли уже начислены бонусы за этого реферала
         cursor.execute('''
             SELECT transaction_id FROM transactions
             WHERE user_id = ? AND type = 'referral_bonus'
             AND description LIKE ?
         ''', (referrer_id, f'%приглашение пользователя {user_id}%'))
-        
+
         existing_bonus = cursor.fetchone()
-        
+
         # Если бонусы еще не начислялись - начисляем
         if not existing_bonus:
             # Начисляем рефереру
@@ -510,21 +519,21 @@ def check_and_award_referral_bonus(user_id):
                 INSERT INTO transactions (user_id, amount, type, description)
                 VALUES (?, ?, ?, ?)
             ''', (referrer_id, 5, 'referral_bonus', f'Бонус за приглашение пользователя {user_id}'))
-            
+
             # Начисляем рефералу приветственный бонус
             cursor.execute("UPDATE users SET stars = stars + 1 WHERE user_id = ?", (user_id,))
             cursor.execute('''
                 INSERT INTO transactions (user_id, amount, type, description)
                 VALUES (?, ?, ?, ?)
             ''', (user_id, 1, 'welcome_bonus', 'Приветственный бонус за регистрацию по реферальной ссылке'))
-            
+
             conn.commit()
-            
+
             # Отправляем уведомление рефереру
             try:
                 cursor.execute("SELECT full_name FROM users WHERE user_id = ?", (user_id,))
                 user_name = cursor.fetchone()[0] or f"User_{user_id}"
-                
+
                 bot.send_message(
                     referrer_id,
                     f'<b>🎉 Поздравляем!</b>\n\n'
@@ -536,7 +545,7 @@ def check_and_award_referral_bonus(user_id):
                 )
             except Exception as e:
                 print(f"Не удалось отправить уведомление рефереру: {e}")
-    
+
     conn.close()
 
 # ========== АДМИН ПАНЕЛЬ ==========
@@ -764,14 +773,14 @@ def process_add_link_simple(message):
     """Обработка добавления простой ссылки"""
     try:
         parts = message.text.split('\n')
-        
+
         if len(parts) < 2:
             bot.send_message(message.chat.id, "❌ Отправьте ссылку и название с новой строки")
             return
 
         channel_link = sanitize_text(parts[0].strip())
         channel_name = sanitize_text(parts[1].strip())
-        
+
         if not channel_link or not channel_name:
             bot.send_message(message.chat.id, "❌ Ссылка и название не могут быть пустыми")
             return
@@ -842,7 +851,7 @@ def process_add_channel(message, channel_type):
     """Обработка добавления канала"""
     try:
         channel_link = sanitize_text(message.text.strip())
-        
+
         if not channel_link:
             bot.send_message(message.chat.id, "❌ Ссылка не может быть пустой")
             return
@@ -850,7 +859,7 @@ def process_add_channel(message, channel_type):
         # Извлекаем username из ссылки
         channel_username = None
         channel_name = channel_link  # По умолчанию используем ссылку как имя
-        
+
         # Пытаемся получить информацию о канале
         try:
             if channel_link.startswith('@'):
@@ -866,10 +875,10 @@ def process_add_channel(message, channel_type):
             else:
                 # Если это не стандартная ссылка на Telegram
                 raise Exception("Не стандартная ссылка Telegram")
-            
+
             channel_id = chat.id
             channel_name = sanitize_text(chat.title) if chat.title else channel_link
-            
+
             if channel_link.startswith('@'):
                 channel_username = channel_link
             else:
@@ -1890,7 +1899,7 @@ def load_channels_from_db():
     cursor.execute("PRAGMA table_info(channels)")
     columns = cursor.fetchall()
     column_names = [col[1] for col in columns]
-    
+
     if 'channel_link' not in column_names:
         cursor.execute("ALTER TABLE channels ADD COLUMN channel_link TEXT NOT NULL DEFAULT ''")
 
@@ -1924,7 +1933,7 @@ def register_user(user_id, username, full_name, referrer_id=None):
     if not user:
         safe_username = sanitize_text(username) if username else ""
         safe_full_name = sanitize_text(full_name) if full_name else f"User_{user_id}"
-        
+
         cursor.execute('''
             INSERT INTO users (user_id, username, full_name, referred_by, stars)
             VALUES (?, ?, ?, ?, ?)
@@ -1937,7 +1946,7 @@ def register_user(user_id, username, full_name, referrer_id=None):
         ''', (user_id, 0, 'registration', 'Регистрация в боте'))
 
         conn.commit()
-        
+
         if referrer_id:
             try:
                 bot.send_message(
@@ -2155,7 +2164,7 @@ def get_transactions(user_id, limit=10):
             'description': safe_desc,
             'timestamp': t[3]
         })
-    
+
     return result
 
 def create_main_menu():
@@ -2288,7 +2297,7 @@ def start_command(message):
 
             # Сначала регистрируем пользователя
             register_user(user_id, username, full_name, None)
-            
+
             # Проверяем подписку на каналы
             if REQUIRED_CHANNELS:
                 is_subscribed, subscription_data = check_subscription_required(user_id)
@@ -2359,7 +2368,7 @@ def start_command(message):
                 referrer_id = None
 
             register_user(user_id, username, full_name, referrer_id)
-            
+
             # После регистрации проверяем подписку на каналы
             if REQUIRED_CHANNELS:
                 is_subscribed, subscription_data = check_subscription_required(user_id)
@@ -2374,7 +2383,7 @@ def start_command(message):
                     return
                 else:
                     check_and_award_referral_bonus(user_id)
-                    
+
                     welcome_text = f'''
 <b>✨ Добро пожаловать, {full_name}!</b>
 
@@ -2384,7 +2393,7 @@ def start_command(message):
 
 <b>👇 Используйте кнопки ниже для навигации:</b>
 '''
-                    
+
                     bot.send_message(
                         message.chat.id,
                         welcome_text,
@@ -2588,7 +2597,7 @@ def process_custom_withdrawal(message):
                 reply_markup=keyboard
             )
             return
-    
+
     try:
         amount = int(message.text)
 
@@ -2995,7 +3004,7 @@ def top_command(message):
 
             safe_username = sanitize_text(user[1]) if user[1] else ""
             safe_full_name = sanitize_text(user[2]) if user[2] else f"User_{user[0]}"
-            
+
             username = f"@{safe_username}" if safe_username else safe_full_name
             stars = user[3] if user[3] else 0
             referrals = user[4] if user[4] else 0
@@ -3107,10 +3116,35 @@ def send_daily_notifications():
 
         time.sleep(24 * 3600)
 
-# Главная функция
+# ========== WEBHOOK НАСТРОЙКИ ==========
+@app.route('/')
+def index():
+    return "✅ Бот работает! Используются вебхуки."
+
+@app.route(WEBHOOK_PATH, methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    else:
+        return 'Bad request', 400
+
+def set_webhook():
+    """Установка вебхука"""
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+        print(f"✅ Вебхук установлен: {WEBHOOK_URL}{WEBHOOK_PATH}")
+    except Exception as e:
+        print(f"❌ Ошибка установки вебхука: {e}")
+
+# ========== ЗАПУСК ==========
 if __name__ == "__main__":
     print("=" * 50)
-    print("🤖 ЗВЕЗДНЫЙ РЕФЕРАЛЬНЫЙ БОТ С ВЫВОДОМ И ЧЕКАМИ ЗАПУЩЕН")
+    print("🤖 ЗВЕЗДНЫЙ РЕФЕРАЛЬНЫЙ БОТ (ВЕБХУКИ)")
     print("=" * 50)
 
     init_db()
@@ -3120,24 +3154,18 @@ if __name__ == "__main__":
     try:
         bot_info = bot.get_me()
         print(f"👤 Имя бота: @{bot_info.username}")
-        print(f"⭐ Система: 5 звезд за каждого друга (только после подписки на обязательные каналы)")
-        print(f"💰 Вывод: от 50 звезд")
-        print(f"🎫 Чеки: поддерживаются")
-        print(f"🔗 Формат ссылки: https://t.me/{bot_info.username}?start=ref_USER_ID")
-        print(f"🎫 Формат чека: https://t.me/{bot_info.username}?start=check_КОД")
+        print(f"🌐 Вебхук URL: {WEBHOOK_URL}{WEBHOOK_PATH}")
         print(f"📺 Обязательных каналов: {len(REQUIRED_CHANNELS)}")
         print(f"🔗 Простых ссылок: {len(SIMPLE_LINKS)}")
         print(f"👑 Админов: {len(ADMIN_IDS)}")
+
+        # Устанавливаем вебхук
+        set_webhook()
+
     except Exception as e:
         print(f"⚠️ Не удалось получить информацию о боте: {e}")
 
     print("=" * 50)
 
-    # Запуск потока для уведомлений
-    notification_thread = threading.Thread(target=send_daily_notifications, daemon=True)
-    notification_thread.start()
-
-    try:
-        bot.infinity_polling()
-    except Exception as e:
-        print(f"❌ Критическая ошибка: {e}")
+    # Запускаем Flask сервер
+    app.run(host='0.0.0.0', port=PORT)
