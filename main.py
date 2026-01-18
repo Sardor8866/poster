@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from flask import Flask, request
 
 # ========== КОНФИГ ==========
-TOKEN = os.getenv('BOT_TOKEN')
-CHANNEL = "@ваш_канал"  # ИЛИ ID канала: -1001234567890
+TOKEN = os.getenv('8430523428:AAGn0c_B4Olu3WWIsw54If3HciGHci23yKo')
+CHANNEL = "@weywewr"  # ИЛИ ID канала: -1001234567890
 POST_INTERVAL = 5  # минут между постами
 PORT = int(os.environ.get('PORT', 10000))
 # ============================
