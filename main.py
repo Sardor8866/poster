@@ -2310,14 +2310,14 @@ def get_top_referrers(limit=10):
     conn = sqlite3.connect('referral_bot.db', check_same_thread=False)
     cursor = conn.cursor()
 
-    # Получаем пользователей, отсортированных по количеству рефералов
+    # ИСПРАВЛЕННЫЙ ЗАПРОС - получаем всех пользователей с количеством рефералов
     cursor.execute('''
         SELECT u.user_id, u.username, u.full_name, u.stars, 
                COUNT(r.user_id) as referrals_count
         FROM users u
         LEFT JOIN users r ON u.user_id = r.referred_by
-        WHERE r.user_id IS NOT NULL  # Только те, у кого есть рефералы
         GROUP BY u.user_id, u.username, u.full_name, u.stars
+        HAVING COUNT(r.user_id) > 0
         ORDER BY referrals_count DESC, u.stars DESC
         LIMIT ?
     ''', (limit,))
@@ -3124,7 +3124,7 @@ def activate_check_command(message):
 ✅ <b>ЧЕК АКТИВИРОВАН</b> ✅
 ═══════════════════════════
 
-<blockquote>✅ <b>Чек активирован успечно!</b> 🎉</blockquote>
+<blockquote>✅ <b>Чек активирован успешно!</b> 🎉</blockquote>
 
 <b>💰 НАЧИСЛЕНИЕ:</b>
 <blockquote>Получено: {result_message.split('! Получено ')[1]}
@@ -3302,19 +3302,18 @@ def stats_command(message):
 
 @bot.message_handler(func=lambda message: message.text == "🏆 Топ рефереров")
 def top_command(message):
-    # ОШИБКА: Здесь была проверка подписки на каналы, но для топа рефереров это не нужно!
-    # Убираем проверку подписки для этой команды
-    # if REQUIRED_CHANNELS:
-    #     is_subscribed, subscription_data = check_subscription_required(message.from_user.id)
-    #     if not is_subscribed:
-    #         channels_text, keyboard = subscription_data
-    #         bot.send_message(
-    #             message.chat.id,
-    #             channels_text,
-    #             parse_mode='HTML',
-    #             reply_markup=keyboard
-    #         )
-    #         return
+    # Проверяем подписку на каналы
+    if REQUIRED_CHANNELS:
+        is_subscribed, subscription_data = check_subscription_required(message.from_user.id)
+        if not is_subscribed:
+            channels_text, keyboard = subscription_data
+            bot.send_message(
+                message.chat.id,
+                channels_text,
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
+            return
 
     top_users = get_top_referrers(10)
 
