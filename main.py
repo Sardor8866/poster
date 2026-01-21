@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 from leaders import register_leaders_handlers, leaders_start
 import mines
 import tower
-import crash
 import leaders
 from referrals import register_referrals_handlers, add_referral_bonus, process_referral_join, send_referral_welcome_message, send_referral_notification_to_referrer
 from states import register_stats_handlers, stats_manager
@@ -51,7 +50,6 @@ app = Flask(__name__)
 leaders.register_leaders_handlers(bot)
 mines.register_mines_handlers(bot)
 tower.register_tower_handlers(bot)
-crash.register_crash_handlers(bot)
 register_referrals_handlers(bot)
 register_stats_handlers(bot)
 register_admin_handlers(bot)
@@ -948,4 +946,5 @@ if __name__ == '__main__':
         port=WEBHOOK_PORT,
         ssl_context=(WEBHOOK_SSL_CERT, WEBHOOK_SSL_PRIV)
     )
+
 
