@@ -1,0 +1,754 @@
+import telebot
+from telebot import types
+import json
+from datetime import datetime
+import telebot.apihelper
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def load_users_data():
+    try:
+        with open('users_data.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.warning("Файл users_data.json не найден, создаем новый")
+        return {}
+    except json.JSONDecodeError:
+        logger.error("Ошибка декодирования JSON, создаем новый файл")
+        return {}
+
+def save_users_data(data):
+    try:
+        with open('users_data.json', 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения данных: {e}")
+        return False
+
+# Глобальная переменная для username бота
+BOT_USERNAME = None
+bot = None
+
+def register_referrals_handlers(bot_instance):
+    global bot, BOT_USERNAME
+    bot = bot_instance
+
+    # Получаем username бота
+    try:
+        bot_info = bot.get_me()
+        BOT_USERNAME = bot_info.username
+        logger.info(f"✅ Получили username бота: @{BOT_USERNAME}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения username бота: {e}")
+        BOT_USERNAME = "YOUR_BOT_USERNAME"
+
+    @bot.callback_query_handler(func=lambda call: call.data == "referral_system")
+    def show_referral_system(call):
+        try:
+            # Обработка устаревших запросов
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+
+            user_id = str(call.from_user.id)
+            users_data = load_users_data()
+
+            if user_id not in users_data:
+                bot.answer_callback_query(call.id, "❌ Сначала зарегистрируйтесь через /start")
+                return
+
+            user_info = users_data[user_id]
+            referral_code = user_info.get('referral_code', user_id)
+            referral_count = len(user_info.get('referrals', []))
+            referral_bonus_balance = user_info.get('referral_bonus', 0)
+            total_referral_income = user_info.get('total_referral_income', 0)
+
+            # Формируем реферальную ссылку
+            referral_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+
+            # Создаем кнопки БЕЗ КНОПКИ НАЗАД
+            markup = types.InlineKeyboardMarkup(row_width=1)
+
+            # Кнопка вывода
+            withdraw_text = "💸 Вывести на баланс"
+            if referral_bonus_balance < 300:
+                withdraw_text = f"💸 Вывести на баланс (нужно {300-referral_bonus_balance}₽)"
+
+            markup.add(
+                types.InlineKeyboardButton(withdraw_text, callback_data="withdraw_referral"),
+                types.InlineKeyboardButton("📋 Мои рефералы", callback_data="my_referrals"),
+                types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}")
+            )
+
+            referral_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   👥 <b>РЕФЕРАЛЬНАЯ СИСТЕМА</b> 👥
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+<b>💰 РЕФЕРАЛЬНЫЙ БАЛАНС:</b>
+├ 💎 Доступно: <b>{referral_bonus_balance}₽</b>
+├ 🎯 Всего рефералов: <b>{referral_count}</b>
+├ 📊 Всего получено: <b>{total_referral_income}₽</b>
+└ 🎯 Процент: <b>6%</b> от выигрышных ставок
+</blockquote>
+
+<blockquote>
+<b>🔗 ВАША РЕФЕРАЛЬНАЯ ССЫЛКА:</b>
+<code>{referral_link}</code>
+</blockquote>
+
+<blockquote>
+<b>🎯 УСЛОВИЯ ВЫВОДА:</b>
+├ 💸 Минимальная сумма: <b>300₽</b>
+├ ⚡ Вывод в любой момент
+└ 🔄 На основной баланс
+</blockquote>
+
+<b>⚠️ Для вывода нажмите кнопку "💸 Вывести на баланс"</b>
+"""
+
+            try:
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=referral_text,
+                    parse_mode='HTML',
+                    reply_markup=markup
+                )
+            except telebot.apihelper.ApiTelegramException as e:
+                if "query is too old" in str(e) or "query ID is invalid" in str(e):
+                    return
+                elif "message is not modified" in str(e):
+                    pass
+                else:
+                    raise e
+            except Exception as e:
+                logger.error(f"Ошибка редактирования сообщения: {e}")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка в show_referral_system: {e}")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "withdraw_referral")
+    def withdraw_referral_bonus(call):
+        try:
+            # Обработка устаревших запросов
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+
+            user_id = str(call.from_user.id)
+            users_data = load_users_data()
+
+            if user_id not in users_data:
+                bot.answer_callback_query(call.id, "❌ Ошибка! Пользователь не найден")
+                return
+
+            user_info = users_data[user_id]
+            referral_bonus = user_info.get('referral_bonus', 0)
+            current_balance = user_info.get('balance', 0)
+
+            # Проверка минимальной суммы
+            if referral_bonus < 300:
+                bot.answer_callback_query(
+                    call.id,
+                    f"❌ Минимальная сумма вывода 300₽\nУ вас: {referral_bonus}₽\nНе хватает: {300-referral_bonus}₽",
+                    show_alert=True
+                )
+                return
+
+            # Создаем подтверждение вывода
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("✅ Да, вывести", callback_data=f"confirm_withdraw_{referral_bonus}"),
+                types.InlineKeyboardButton("❌ Отмена", callback_data="referral_system")
+            )
+
+            confirm_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   💸 <b>ПОДТВЕРЖДЕНИЕ ВЫВОДА</b> 💸
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+<b>⚠️ Подтвердите вывод реферальных средств</b>
+</blockquote>
+
+<blockquote>
+<b>📊 ДАННЫЕ О ВЫВОДЕ:</b>
+├ 💰 Сумма к выводу: <b>{referral_bonus}₽</b>
+├ 📤 На счет: <b>Основной баланс</b>
+├ 💵 Текущий баланс: <b>{current_balance}₽</b>
+└ 💵 После вывода: <b>{current_balance + referral_bonus}₽</b>
+</blockquote>
+
+<blockquote>
+<b>📝 УСЛОВИЯ:</b>
+├ ⚡ Вывод моментальный
+├ 🔄 Без комиссии
+└ ✅ Необратимая операция
+</blockquote>
+
+<b>Вы уверены, что хотите вывести {referral_bonus}₽ на основной баланс?</b>
+"""
+
+            try:
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=confirm_text,
+                    parse_mode='HTML',
+                    reply_markup=markup
+                )
+            except telebot.apihelper.ApiTelegramException as e:
+                if "query is too old" in str(e) or "query ID is invalid" in str(e):
+                    return
+                else:
+                    raise e
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка в withdraw_referral_bonus: {e}")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_withdraw_"))
+    def process_withdraw_confirmation(call):
+        try:
+            # Обработка устаревших запросов
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+
+            user_id = str(call.from_user.id)
+            users_data = load_users_data()
+
+            if user_id not in users_data:
+                bot.answer_callback_query(call.id, "❌ Ошибка! Пользователь не найден")
+                return
+
+            # Получаем сумму из callback_data
+            withdraw_amount_str = call.data.split("_")[2]
+            try:
+                withdraw_amount = float(withdraw_amount_str)
+            except:
+                withdraw_amount = 0
+
+            user_info = users_data[user_id]
+            referral_bonus = user_info.get('referral_bonus', 0)
+
+            # Проверяем, что сумма не изменилась
+            if withdraw_amount != referral_bonus:
+                bot.answer_callback_query(
+                    call.id,
+                    "❌ Ошибка! Сумма изменилась. Обновите страницу",
+                    show_alert=True
+                )
+                return
+
+            # Проверяем минимальную суммы
+            if referral_bonus < 300:
+                bot.answer_callback_query(
+                    call.id,
+                    f"❌ Минимальная сумма вывода 300₽",
+                    show_alert=True
+                )
+                return
+
+            # Сохраняем старые значения для лога
+            old_referral_balance = referral_bonus
+            old_main_balance = user_info.get('balance', 0)
+
+            # Выводим на основной баланс
+            users_data[user_id]['balance'] = round(old_main_balance + referral_bonus, 2)
+            users_data[user_id]['referral_bonus'] = 0
+
+            # Обновляем историю выводов
+            if 'withdrawal_history' not in users_data[user_id]:
+                users_data[user_id]['withdrawal_history'] = []
+
+            withdrawal_record = {
+                'type': 'referral',
+                'amount': referral_bonus,
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'from': 'referral_bonus',
+                'to': 'main_balance'
+            }
+            users_data[user_id]['withdrawal_history'].append(withdrawal_record)
+
+            save_users_data(users_data)
+
+            # Формируем сообщение об успехе
+            new_balance = users_data[user_id]['balance']
+
+            success_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   ✅ <b>ВЫВОД УСПЕШНО ВЫПОЛНЕН</b> ✅
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+<b>🎉 Средства успешно переведены!</b>
+</blockquote>
+
+<blockquote>
+<b>📊 ДЕТАЛИ ОПЕРАЦИИ:</b>
+├ 💰 Выведенная сумма: <b>{old_referral_balance}₽</b>
+├ 📤 Откуда: <b>Реферальный баланс</b>
+├ 📥 Куда: <b>Основной баланс</b>
+├ 💵 Было на основном: <b>{old_main_balance}₽</b>
+└ 💵 Стало на основном: <b>{new_balance}₽</b>
+</blockquote>
+
+<blockquote>
+<b>⚡ СТАТУС:</b> <b>Завершено успешно</b>
+<b>📅 ДАТА:</b> <b>{datetime.now().strftime("%d.%m.%Y %H:%M")}</b>
+<b>🆔 ID ОПЕРАЦИИ:</b> <b>REF-{user_id[:6]}-{datetime.now().strftime('%H%M%S')}</b>
+</blockquote>
+
+<b>✅ Теперь вы можете использовать {old_referral_balance}₽ для ставок!</b>
+"""
+
+            # ТОЛЬКО КНОПКА В РЕФЕРАЛЫ (без кнопки На баланс)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("👥 В рефералы", callback_data="referral_system"))
+
+            try:
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=success_text,
+                    parse_mode='HTML',
+                    reply_markup=markup
+                )
+            except telebot.apihelper.ApiTelegramException as e:
+                if "query is too old" in str(e) or "query ID is invalid" in str(e):
+                    return
+                else:
+                    raise e
+
+            # Отправляем уведомление об успехе
+            bot.answer_callback_query(
+                call.id,
+                f"✅ Успешно! {old_referral_balance}₽ переведены на основной баланс",
+                show_alert=True
+            )
+
+            # Логируем операцию
+            logger.info(f"✅ Вывод реферальных средств: {user_id}")
+            logger.info(f"💰 Сумма: {old_referral_balance}₽")
+            logger.info(f"📊 Баланс до: {old_main_balance}₽, после: {new_balance}₽")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка в process_withdraw_confirmation: {e}")
+            bot.answer_callback_query(
+                call.id,
+                "❌ Произошла ошибка при выводе",
+                show_alert=True
+            )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "my_referrals")
+    def show_my_referrals(call):
+        try:
+            # Обработка устаревших запросов
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+
+            user_id = str(call.from_user.id)
+            users_data = load_users_data()
+
+            if user_id not in users_data:
+                bot.answer_callback_query(call.id, "❌ Сначала зарегистрируйтесь через /start")
+                return
+
+            user_info = users_data[user_id]
+            referrals_list = user_info.get('referrals', [])
+            referral_bonus = user_info.get('referral_bonus', 0)
+            total_referral_income = user_info.get('total_referral_income', 0)
+
+            if not referrals_list:
+                no_ref_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   📋 <b>МОИ РЕФЕРАЛЫ</b> 📋
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+<b>💰 Реферальный баланс:</b> <b>{referral_bonus}₽</b>
+<b>📊 Всего получено:</b> <b>{total_referral_income}₽</b>
+</blockquote>
+
+<blockquote>
+😔 <b>У вас пока нет рефералов</b>
+</blockquote>
+"""
+
+                markup = types.InlineKeyboardMarkup()
+                markup.row(types.InlineKeyboardButton("👥 К рефералам", callback_data="referral_system"))
+
+                try:
+                    bot.edit_message_text(
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=no_ref_text,
+                        parse_mode='HTML',
+                        reply_markup=markup
+                    )
+                except telebot.apihelper.ApiTelegramException as e:
+                    if "query is too old" in str(e) or "query ID is invalid" in str(e):
+                        return
+                    else:
+                        raise e
+                return
+
+            active_count = 0
+
+            referrals_details = ""
+            for i, ref_id in enumerate(referrals_list[:50], 1):
+                if ref_id in users_data:
+                    ref_info = users_data[ref_id]
+                    ref_name = ref_info.get('first_name', f'Игрок {ref_id[:4]}')
+                    ref_username = f"@{ref_info.get('username', '')}" if ref_info.get('username') else ref_name
+                    ref_won_games = ref_info.get('games_won', 0)
+
+                    is_active = ref_won_games > 0
+                    if is_active:
+                        active_count += 1
+
+                    status_emoji = "✅" if is_active else "⏳"
+                    referrals_details += f"{i}. {status_emoji} {ref_username}\n"
+
+            stats_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   📋 <b>МОИ РЕФЕРАЛЫ</b> 📋
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+<b>💰 РЕФЕРАЛЬНЫЙ БАЛАНС:</b> <b>{referral_bonus}₽</b>
+<b>📊 ВСЕГО ПОЛУЧЕНО:</b> <b>{total_referral_income}₽</b>
+</blockquote>
+
+<blockquote>
+<b>📊 СТАТИСТИКА:</b>
+├ 👥 Всего рефералов: <b>{len(referrals_list)}</b>
+├ ✅ Активных: <b>{active_count}</b>
+└ 🎯 Процент: <b>6%</b> от выигрышей
+</blockquote>
+
+<blockquote>
+<b>📝 СПИСОК РЕФЕРАЛОВ:</b>
+{referrals_details if referrals_details else "Список пуст"}
+</blockquote>
+"""
+
+            markup = types.InlineKeyboardMarkup()
+            if referral_bonus >= 300:
+                markup.row(types.InlineKeyboardButton("💸 Вывести на баланс", callback_data="withdraw_referral"))
+            markup.row(types.InlineKeyboardButton("👥 К рефералам", callback_data="referral_system"))
+
+            try:
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=stats_text,
+                    parse_mode='HTML',
+                    reply_markup=markup
+                )
+            except telebot.apihelper.ApiTelegramException as e:
+                if "query is too old" in str(e) or "query ID is invalid" in str(e):
+                    return
+                elif "Can't find end tag" in str(e):
+                    simple_text = f"📋 Ваши рефералы: {len(referrals_list)}\n💰 Реферальный баланс: {referral_bonus}₽\n📊 Всего получено: {total_referral_income}₽"
+                    bot.edit_message_text(
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=simple_text,
+                        reply_markup=markup
+                    )
+                else:
+                    raise e
+            except Exception as e:
+                logger.error(f"Ошибка в show_my_referrals: {e}")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка в show_my_referrals: {e}")
+
+def add_referral_bonus(user_id, win_amount):
+    """
+    Начисляет 6% от выигрыша реферала его рефереру
+    """
+    try:
+        users_data = load_users_data()
+
+        if user_id not in users_data:
+            logger.error(f"❌ Пользователь {user_id} не найден")
+            return
+
+        # Получаем ID реферера
+        referrer_id = users_data[user_id].get('referrer_id')
+        if not referrer_id:
+            logger.error(f"❌ У пользователя {user_id} нет реферера")
+            return
+
+        # Проверяем, существует ли реферер
+        if referrer_id not in users_data:
+            logger.error(f"❌ Реферер {referrer_id} не найден")
+            return
+
+        # Вычисляем бонус (6% от суммы выигрыша)
+        bonus = round(win_amount * 0.06, 2)
+
+        # Добавляем бонус в реферальный баланс
+        current_bonus = users_data[referrer_id].get('referral_bonus', 0)
+        users_data[referrer_id]['referral_bonus'] = round(current_bonus + bonus, 2)
+
+        # Обновляем общий доход от рефералов
+        current_income = users_data[referrer_id].get('total_referral_income', 0)
+        users_data[referrer_id]['total_referral_income'] = round(current_income + bonus, 2)
+
+        save_users_data(users_data)
+
+        # Логируем
+        logger.info(f"🎯 Реферальный бонус: {user_id} -> {referrer_id}")
+        logger.info(f"💰 Сумма выигрыша: {win_amount}₽")
+        logger.info(f"🎯 Бонус (6%): {bonus}₽")
+        logger.info(f"💰 Новый реферальный баланс {referrer_id}: {users_data[referrer_id]['referral_bonus']}₽")
+        logger.info(f"📊 Всего получено {referrer_id}: {users_data[referrer_id]['total_referral_income']}₽")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при начислении реферального бонуса: {e}")
+
+def process_referral_join(new_user_id, referral_code, user_data=None):
+    """
+    Обрабатывает присоединение по реферальной ссылке.
+    user_data - данные нового пользователя (опционально)
+    ВОЗВРАЩАЕТ: {'success': True/False, 'message': 'причина', 'referrer_data': {...}}
+    """
+    try:
+        users_data = load_users_data()
+        
+        # Исправление: referral_code - это ID пользователя, проверяем по ID
+        if referral_code not in users_data:
+            return {
+                'success': False,
+                'message': 'Реферер не найден',
+                'referrer_data': None
+            }
+        
+        # Проверяем, не является ли пользователь самим собой реферером
+        if new_user_id == referral_code:
+            return {
+                'success': False,
+                'message': 'Нельзя пригласить самого себя',
+                'referrer_data': None
+            }
+        
+        # ВАЖНОЕ ИСПРАВЛЕНИЕ: Проверяем, существует ли уже пользователь
+        is_new_user = new_user_id not in users_data
+        
+        # ЕСЛИ ПОЛЬЗОВАТЕЛЬ УЖЕ СУЩЕСТВУЕТ - НЕ ДОБАВЛЯЕМ ЕГО В РЕФЕРАЛЫ!
+        # (защита от повторного добавления)
+        if not is_new_user:
+            logger.info(f"⚠️ Пользователь {new_user_id} уже существует, не добавляем в рефералы")
+            return {
+                'success': False,
+                'message': 'Пользователь уже зарегистрирован',
+                'referrer_data': None
+            }
+        
+        # ТОЛЬКО ДЛЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ:
+        # 1. Создаем запись нового пользователя
+        if user_data is None:
+            user_data = {
+                'referrer_id': referral_code,
+                'first_name': f'Игрок{new_user_id[-4:]}',
+                'username': '',
+                'balance': 0.0,
+                'referral_bonus': 0.0,
+                'total_referral_income': 0.0,
+                'referrals': [],
+                'games_played': 0,
+                'games_won': 0,
+                'registration_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'referral_code': new_user_id  # код для приглашения других
+            }
+        
+        # Добавляем referrer_id к данным пользователя
+        user_data['referrer_id'] = referral_code
+        
+        # Сохраняем нового пользователя
+        users_data[new_user_id] = user_data
+        
+        # 2. Добавляем в список рефералов реферера
+        if 'referrals' not in users_data[referral_code]:
+            users_data[referral_code]['referrals'] = []
+        
+        # Проверяем, не добавляли ли уже этого реферала
+        if new_user_id not in users_data[referral_code]['referrals']:
+            users_data[referral_code]['referrals'].append(new_user_id)
+        
+        # 3. СОХРАНЯЕМ ДАННЫЕ
+        save_success = save_users_data(users_data)
+        
+        if not save_success:
+            return {
+                'success': False,
+                'message': 'Ошибка сохранения данных',
+                'referrer_data': None
+            }
+        
+        # Получаем данные реферера для отправки сообщения
+        referrer_name = users_data[referral_code].get('first_name', 'Ваш друг')
+        referrer_username = users_data[referral_code].get('username', '')
+        
+        logger.info(f"✅ Новый реферал зарегистрирован: {new_user_id} приглашен пользователем {referral_code}")
+        logger.info(f"📊 Рефералов у {referral_code}: {len(users_data[referral_code]['referrals'])}")
+        logger.info(f"📝 Данные пользователя {new_user_id} созданы успешно")
+        
+        return {
+            'success': True,
+            'message': 'Реферал успешно зарегистрирован',
+            'referrer_data': {
+                'referrer_id': referral_code,
+                'referrer_name': referrer_name,
+                'referrer_username': referrer_username
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка обработки реферала: {e}")
+        return {
+            'success': False,
+            'message': f'Ошибка: {str(e)}',
+            'referrer_data': None
+        }
+
+def send_referral_welcome_message(chat_id, referrer_data):
+    """
+    Отправляет красивое сообщение о приглашении по реферальной ссылке
+    ТОЛЬКО ДЛЯ НОВЫХ РЕФЕРАЛОВ
+    """
+    try:
+        global bot
+        if bot is None:
+            return
+        
+        referrer_name = referrer_data.get('referrer_name', 'Ваш друг')
+        referrer_username = referrer_data.get('referrer_username', '')
+        
+        if referrer_username:
+            referrer_mention = f"@{referrer_username}"
+        else:
+            referrer_mention = referrer_name
+            
+        welcome_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   🎉 <b>РЕФЕРАЛЬНОЕ ПРИГЛАШЕНИЕ</b> 🎉
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+✨ <b>Поздравляем!</b> Вы присоединились к проекту
+по приглашению <b>{referrer_mention}</b>
+</blockquote>
+
+<blockquote>
+<b>🎯 ВАШИ БОНУСЫ:</b>
+├ ✅ Реферальная система активирована
+├ 🔥 Теперь вы в команде {referrer_name}
+├ 💫 Ваши выигрыши приносят бонусы рефереру
+└ 🚀 Удачной игры и больших побед!
+</blockquote>
+
+<blockquote>
+<b>📊 КАК ЭТО РАБОТАЕТ:</b>
+Ваш реферер получает <b>6%</b> от ваших
+выигрышных ставок на свой реферальный баланс
+</blockquote>
+
+<blockquote>
+<i>🔥 Добро пожаловать в команду!
+Удачной игры и больших выигрышей! 💰</i>
+</blockquote>
+"""
+        
+        bot.send_message(
+            chat_id,
+            welcome_text,
+            parse_mode='HTML'
+        )
+        logger.info(f"✅ Отправлено приветственное реферальное сообщение для чата {chat_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки реферального приветствия: {e}")
+
+def send_referral_notification_to_referrer(referrer_id, new_user_id):
+    """
+    Отправляет уведомление рефереру о новом реферале (ТОЛЬКО ОДИН РАЗ)
+    """
+    try:
+        global bot
+        if bot is None:
+            return
+        
+        # Проверяем, не отправлялось ли уже уведомление для этого реферала
+        users_data = load_users_data()
+        if referrer_id not in users_data:
+            return
+        
+        # Получаем данные нового пользователя
+        if new_user_id in users_data:
+            new_user_data = users_data[new_user_id]
+            new_user_name = new_user_data.get('first_name', 'Новый игрок')
+            new_user_username = f"@{new_user_data.get('username')}" if new_user_data.get('username') else new_user_name
+        else:
+            # Если пользователя нет в базе - значит произошла ошибка
+            logger.error(f"❌ Новый пользователь {new_user_id} не найден в базе данных")
+            return
+        
+        # Проверяем, не было ли уже уведомления (по флагу в данных)
+        if 'referral_notifications_sent' not in users_data[referrer_id]:
+            users_data[referrer_id]['referral_notifications_sent'] = []
+        
+        # Если уведомление для этого реферала уже отправлялось - выходим
+        if new_user_id in users_data[referrer_id]['referral_notifications_sent']:
+            logger.info(f"⚠️ Уведомление для реферала {new_user_id} уже отправлялось рефереру {referrer_id}")
+            return
+        
+        # Получаем статистику реферера
+        referral_count = len(users_data[referrer_id].get('referrals', []))
+        referral_bonus = users_data[referrer_id].get('referral_bonus', 0)
+        
+        # Простое уведомление - только важная информация
+        notification_text = f"""
+<blockquote>╔══════════════════╗
+   🎉 <b>НОВЫЙ РЕФЕРАЛ</b> 🎉
+╚══════════════════╝</blockquote>
+
+<b>👤 Реферал:</b> {new_user_username}
+<b>🆔 ID:</b> <code>{new_user_id[-8:]}</code>
+
+<b>📊 Ваша статистика:</b>
+├ 👥 Всего: <b>{referral_count}</b>
+└ 💰 Баланс: <b>{referral_bonus}₽</b>
+
+<b>🎯 Бонус:</b> 6% от выигрышей
+"""
+        
+        # Отправляем уведомление
+        bot.send_message(
+            referrer_id,
+            notification_text,
+            parse_mode='HTML'
+        )
+        
+        # Отмечаем, что уведомление отправлено
+        users_data[referrer_id]['referral_notifications_sent'].append(new_user_id)
+        save_users_data(users_data)
+        
+        logger.info(f"✅ Отправлено уведомление рефереру {referrer_id} о новом реферале {new_user_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки уведомления рефереру: {e}")
