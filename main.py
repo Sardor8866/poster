@@ -4,9 +4,10 @@ import json
 from datetime import datetime
 import re
 # ДОБАВЬТЕ ЭТИ ИМПОРТЫ:
+import os
 from flask import Flask, request
 import logging
-import os
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,9 +16,12 @@ logger = logging.getLogger(__name__)
 from leaders import register_leaders_handlers, leaders_start
 import mines
 import tower
+import crash
 import leaders
 from referrals import register_referrals_handlers, add_referral_bonus, process_referral_join, send_referral_welcome_message, send_referral_notification_to_referrer
+from states import register_stats_handlers, stats_manager
 from admin_panel import register_admin_handlers
+from game_stats_handler import init_stats_handler
 from games import register_games_handlers
 
 # ИМПОРТИРУЕМ НОВЫЙ МОДУЛЬ ПЛАТЕЖЕЙ
@@ -30,9 +34,23 @@ except ImportError as e:
     print(f"⚠️ Модуль платежей не найден: {e}")
     print("⚠️ Функции пополнения и вывода будут недоступны")
 
-bot = telebot.TeleBot("8492517983:AAFyp_KsZyIVBaYqY2CRbjKYHCky3WuwxUQ")
+bot = telebot.TeleBot("8346191757:AAFFh6fM7sAuuAs1L_q2Di_T1QFMehWld6c")
 
-# ==== ДОБАВЬТЕ ЭТУ КОНФИГУРАЦИЮ ВЕБХУКА ====
+# ==== КОНФИГУРАЦИЯ ВЕБХУКА ДЛЯ RENDER ====
+# ДОЛЖНО БЫТЬ ПОСЛЕ СОЗДАНИЯ БОТА!
+
+# 1. Вариант: Использовать Render автоматически
+RENDER = os.environ.get('RENDER', False)
+
+if RENDER:
+    # На Render
+    WEBHOOK_HOST = os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'ваш-проект.onrender.com')
+else:
+    # Для локального тестирования
+    WEBHOOK_HOST = 'localhost'
+
+WEBHOOK_PORT = 443 if RENDER else 8443
+WEBHOOK_LISTEN = '0.0.0.0'
 WEBHOOK_URL_BASE = f"https://{WEBHOOK_HOST}"
 WEBHOOK_URL_PATH = f"/webhook/{bot.token}/"
 
@@ -901,8 +919,11 @@ def callback_handler(call):
 #ВЕБХУК
 # ... (весь ваш существующий код остается) ...
 
+# ... (весь ваш существующий код остается) ...
+
 print("🔥 Flame Game запущен...")
 print(f"✅ Модуль платежей: {'ВКЛЮЧЕН' if PAYMENTS_ENABLED else 'ОТКЛЮЧЕН'}")
+print(f"🌐 Вебхук: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}")
 
 # ==== ДОБАВЬТЕ ЭТИ ФУНКЦИИ ВЕБХУКА В КОНЦЕ ФАЙЛА ====
 
@@ -921,12 +942,15 @@ def webhook():
 def index():
     return 'Bot is running!'
 
-# Для Render - УПРОЩЕННАЯ версия без SSL файлов
+@app.route('/health')
+def health():
+    return 'OK', 200
+
+# Для Render - установка вебхука
 @app.route('/set_webhook')
 def set_webhook_route():
     try:
         bot.remove_webhook()
-        # На Render не нужен certificate параметр
         bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
         return f'✅ Вебхук установлен: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}'
     except Exception as e:
@@ -936,15 +960,25 @@ def set_webhook_route():
 def set_webhook():
     try:
         bot.remove_webhook()
-        # На Render SSL автоматический, не нужен certificate
         bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
         print(f"✅ Вебхук установлен: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}")
+        return True
     except Exception as e:
         print(f"⚠️ Ошибка установки вебхука: {e}")
+        return False
 
 # Запуск Flask приложения для Render
 if __name__ == '__main__':
-    set_webhook()
-    # Render сам управляет портом через переменную окружения
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    if set_webhook():
+        # Получаем порт из переменной окружения Render
+        port = int(os.environ.get('PORT', 10000))
+        print(f"🚀 Запуск на порту: {port}")
+        
+        if RENDER:
+            # На Render без SSL (они управляют этим)
+            app.run(host='0.0.0.0', port=port)
+        else:
+            # Для локального тестирования (нужны SSL файлы)
+            app.run(host='0.0.0.0', port=port, debug=True)
+    else:
+        print("❌ Не удалось установить вебхук")
