@@ -6,7 +6,7 @@ import re
 # ДОБАВЬТЕ ЭТИ ИМПОРТЫ:
 from flask import Flask, request
 import logging
-
+import os
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,13 +33,8 @@ except ImportError as e:
 bot = telebot.TeleBot("8492517983:AAFyp_KsZyIVBaYqY2CRbjKYHCky3WuwxUQ")
 
 # ==== ДОБАВЬТЕ ЭТУ КОНФИГУРАЦИЮ ВЕБХУКА ====
-WEBHOOK_HOST = 'https://poster-x4jl.onrender.com/'  # Ваш реальный домен
-WEBHOOK_PORT = 443              # Порт (443 для HTTPS)
-WEBHOOK_LISTEN = '0.0.0.0'      # Слушать все интерфейсы
-WEBHOOK_SSL_CERT = './ssl/cert.pem'    # Путь к SSL сертификату
-WEBHOOK_SSL_PRIV = './ssl/private.key' # Путь к приватному ключу
-WEBHOOK_URL_BASE = f"https://{WEBHOOK_HOST}:{WEBHOOK_PORT}"
-WEBHOOK_URL_PATH = f"/{bot.token}/"
+WEBHOOK_URL_BASE = f"https://{WEBHOOK_HOST}"
+WEBHOOK_URL_PATH = f"/webhook/{bot.token}/"
 
 # Создаем Flask приложение
 app = Flask(__name__)
@@ -904,6 +899,8 @@ def callback_handler(call):
         bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
 
 #ВЕБХУК
+# ... (весь ваш существующий код остается) ...
+
 print("🔥 Flame Game запущен...")
 print(f"✅ Модуль платежей: {'ВКЛЮЧЕН' if PAYMENTS_ENABLED else 'ОТКЛЮЧЕН'}")
 
@@ -920,28 +917,34 @@ def webhook():
     else:
         abort(403)
 
-# Настройка вебхука
 @app.route('/')
 def index():
     return 'Bot is running!'
 
-# Функция для установки вебхука
-def set_webhook():
-    bot.remove_webhook()
-    bot.set_webhook(
-        url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH,
-        certificate=open(WEBHOOK_SSL_CERT, 'r')
-    )
-    print(f"✅ Вебхук установлен: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}")
+# Для Render - УПРОЩЕННАЯ версия без SSL файлов
+@app.route('/set_webhook')
+def set_webhook_route():
+    try:
+        bot.remove_webhook()
+        # На Render не нужен certificate параметр
+        bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
+        return f'✅ Вебхук установлен: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}'
+    except Exception as e:
+        return f'❌ Ошибка: {str(e)}'
 
-# Запуск Flask приложения (вместо bot.infinity_polling())
+# Функция для установки вебхука при запуске
+def set_webhook():
+    try:
+        bot.remove_webhook()
+        # На Render SSL автоматический, не нужен certificate
+        bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
+        print(f"✅ Вебхук установлен: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}")
+    except Exception as e:
+        print(f"⚠️ Ошибка установки вебхука: {e}")
+
+# Запуск Flask приложения для Render
 if __name__ == '__main__':
     set_webhook()
-    app.run(
-        host=WEBHOOK_LISTEN,
-        port=WEBHOOK_PORT,
-        ssl_context=(WEBHOOK_SSL_CERT, WEBHOOK_SSL_PRIV)
-    )
-
-
-
+    # Render сам управляет портом через переменную окружения
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
