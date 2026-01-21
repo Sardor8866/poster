@@ -17,9 +17,7 @@ import mines
 import tower
 import leaders
 from referrals import register_referrals_handlers, add_referral_bonus, process_referral_join, send_referral_welcome_message, send_referral_notification_to_referrer
-from states import register_stats_handlers, stats_manager
 from admin_panel import register_admin_handlers
-from game_stats_handler import init_stats_handler
 from games import register_games_handlers
 
 # ИМПОРТИРУЕМ НОВЫЙ МОДУЛЬ ПЛАТЕЖЕЙ
@@ -51,9 +49,7 @@ leaders.register_leaders_handlers(bot)
 mines.register_mines_handlers(bot)
 tower.register_tower_handlers(bot)
 register_referrals_handlers(bot)
-register_stats_handlers(bot)
 register_admin_handlers(bot)
-init_stats_handler(stats_manager)
 register_games_handlers(bot)
 
 # Регистрируем хендлеры платежей если модуль доступен
@@ -946,5 +942,6 @@ if __name__ == '__main__':
         port=WEBHOOK_PORT,
         ssl_context=(WEBHOOK_SSL_CERT, WEBHOOK_SSL_PRIV)
     )
+
 
 
