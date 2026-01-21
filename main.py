@@ -16,12 +16,9 @@ logger = logging.getLogger(__name__)
 from leaders import register_leaders_handlers, leaders_start
 import mines
 import tower
-import crash
 import leaders
 from referrals import register_referrals_handlers, add_referral_bonus, process_referral_join, send_referral_welcome_message, send_referral_notification_to_referrer
-from states import register_stats_handlers, stats_manager
 from admin_panel import register_admin_handlers
-from game_stats_handler import init_stats_handler
 from games import register_games_handlers
 
 # ИМПОРТИРУЕМ НОВЫЙ МОДУЛЬ ПЛАТЕЖЕЙ
@@ -34,7 +31,7 @@ except ImportError as e:
     print(f"⚠️ Модуль платежей не найден: {e}")
     print("⚠️ Функции пополнения и вывода будут недоступны")
 
-bot = telebot.TeleBot("8346191757:AAFFh6fM7sAuuAs1L_q2Di_T1QFMehWld6c")
+bot = telebot.TeleBot("8492517983:AAFyp_KsZyIVBaYqY2CRbjKYHCky3WuwxUQ")
 
 # ==== КОНФИГУРАЦИЯ ВЕБХУКА ДЛЯ RENDER ====
 # ДОЛЖНО БЫТЬ ПОСЛЕ СОЗДАНИЯ БОТА!
@@ -44,7 +41,7 @@ RENDER = os.environ.get('RENDER', False)
 
 if RENDER:
     # На Render
-    WEBHOOK_HOST = os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'ваш-проект.onrender.com')
+    WEBHOOK_HOST = os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'https://poster-x4jl.onrender.com/')
 else:
     # Для локального тестирования
     WEBHOOK_HOST = 'localhost'
@@ -982,3 +979,4 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("❌ Не удалось установить вебхук")
+
