@@ -33,7 +33,7 @@ except ImportError as e:
     print(f"⚠️ Модуль платежей не найден: {e}")
     print("⚠️ Функции пополнения и вывода будут недоступны")
 
-bot = telebot.TeleBot("8346191757:AAFFh6fM7sAuuAs1L_q2Di_T1QFMehWld6c")
+bot = telebot.TeleBot("8492517983:AAFyp_KsZyIVBaYqY2CRbjKYHCky3WuwxUQ")
 
 # ==== ДОБАВЬТЕ ЭТУ КОНФИГУРАЦИЮ ВЕБХУКА ====
 WEBHOOK_HOST = 'https://poster-x4jl.onrender.com/'  # Ваш реальный домен
@@ -948,3 +948,4 @@ if __name__ == '__main__':
         port=WEBHOOK_PORT,
         ssl_context=(WEBHOOK_SSL_CERT, WEBHOOK_SSL_PRIV)
     )
+
