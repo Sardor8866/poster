@@ -187,7 +187,7 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        dice_msg = bot.send_dice(message.chat.id, emoji='🎲')
+        dice_msg = bot.send_dice(message.chat.id, emoji='🎲', reply_to_message_id=message.message_id)
         
         time.sleep(3)
         
@@ -438,7 +438,7 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        basketball_msg = bot.send_dice(message.chat.id, emoji='🏀')
+        basketball_msg = bot.send_dice(message.chat.id, emoji='🏀', reply_to_message_id=message.message_id)
         
         time.sleep(3)
         
@@ -708,7 +708,7 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        football_msg = bot.send_dice(message.chat.id, emoji='⚽')
+        football_msg = bot.send_dice(message.chat.id, emoji='⚽', reply_to_message_id=message.message_id)
         
         time.sleep(3.5)
         
@@ -965,7 +965,7 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        darts_msg = bot.send_dice(message.chat.id, emoji='🎯')
+        darts_msg = bot.send_dice(message.chat.id, emoji='🎯', reply_to_message_id=message.message_id)
         
         time.sleep(3)
         
@@ -1318,7 +1318,7 @@ def register_games_handlers(bot_instance):
     global bot
     bot = bot_instance
 
-    @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['чет', 'even', 'нечет', 'odd', 'больше', 'more', 'high', 'меньше', 'less', 'low']) and not message.text.startswith('/'))
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['чет', 'even', 'нечет', 'odd', 'больше', 'more', 'high', 'меньше', 'less', 'low'] and len(message.text.strip().split()) >= 2)
     def dice_no_slash_commands(message):
         try:
             text = message.text.lower()
@@ -1482,7 +1482,7 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в dice_low_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['баскетбол', 'баскет', 'basketball', 'basket']) and not message.text.startswith('/'))
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['баскетбол', 'баскет', 'basketball', 'basket'] and len(message.text.strip().split()) >= 3)
     def basketball_no_slash_commands(message):
         try:
             text = message.text.lower()
@@ -1571,7 +1571,7 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в basketball_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['футбол', 'фут', 'football', 'foot']) and not message.text.startswith('/'))
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['футбол', 'фут', 'football', 'foot'] and len(message.text.strip().split()) >= 3)
     def football_no_slash_commands(message):
         try:
             text = message.text.lower()
@@ -1657,7 +1657,7 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в football_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['дартс', 'дарт', 'darts', 'dart']) and not message.text.startswith('/'))
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['дартс', 'дарт', 'darts', 'dart'] and len(message.text.strip().split()) >= 3)
     def darts_no_slash_commands(message):
         try:
             text = message.text.lower()
