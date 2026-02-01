@@ -7,19 +7,15 @@ import threading
 import logging
 import hashlib
 
-# Добавляем импорт модуля referrals
-import referrals  # ИМПОРТ ДЛЯ РЕФЕРАЛЬНЫХ БОНУСОВ
+import referrals
 
-# Импорт функций из модуля лидеров
 try:
     from leaders import add_game_to_history
 except ImportError:
-    # Функция-заглушка, если модуль лидеров не найден
     def add_game_to_history(user_id, bet_amount, win_amount, is_win, game_type="tower"):
         logging.warning(f"Модуль лидеров не найден, игра не записана в историю: {user_id}")
         return False
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TowerGame:
@@ -28,9 +24,8 @@ class TowerGame:
         self.dragons_count = dragons_count
         self.bet_amount = bet_amount
         self.floor = 0
-        self.game_active = True  # Флаг активности игры
+        self.game_active = True
         self.session_token = self.generate_session_token(user_id, 'tower')
-        # Множители для 6 этажей и 1-4 драконов
         self.multipliers = {
             1: [1.2, 1.6, 2.3, 4.7],
             2: [1.5, 2.4, 6.0, 24.0],
@@ -41,11 +36,11 @@ class TowerGame:
         }
         self.dragon_floors = {}
         self.selected_cells = {}
-        self.last_action_time = time.time()  # Время последнего действия
-        self.action_lock = threading.Lock()  # Лок для защиты от конкурентных действий
-        self.created_time = time.time()  # Время создания игры
-        self.chat_id = chat_id  # ID чата с игрой
-        self.message_id = message_id  # ID сообщения с игрой
+        self.last_action_time = time.time()
+        self.action_lock = threading.Lock()
+        self.created_time = time.time()
+        self.chat_id = chat_id
+        self.message_id = message_id
         self.generate_dragons()
 
     def generate_session_token(self, user_id, game_type):
@@ -55,9 +50,7 @@ class TowerGame:
         return hashlib.md5(data.encode()).hexdigest()[:8]
 
     def generate_dragons(self):
-        # Генерируем драконов для каждого этажа (1-6)
-        for floor in range(1, 7):  # Только 6 этажей
-            # Случайно выбираем cells_count драконов на этом этаже из 5 возможных ячеек
+        for floor in range(1, 7):
             available_cells = list(range(5))
             random.shuffle(available_cells)
             self.dragon_floors[floor] = available_cells[:self.dragons_count]
@@ -66,9 +59,8 @@ class TowerGame:
         self.floor += 1
         current_floor = self.floor
 
-        # Проверяем, есть ли дракон в выбранной ячейке на текущем этаже
         if current_floor in self.dragon_floors and selected_cell in self.dragon_floors[current_floor]:
-            self.game_active = False  # Игра завершается при встрече с драконом
+            self.game_active = False
             return False
         return True
 
@@ -81,7 +73,6 @@ class TowerGame:
     def get_current_multiplier(self):
         if self.floor == 0:
             return 1.0
-        # Получаем множитель в зависимости от этажа и количества драконов
         dragon_index = self.dragons_count - 1
         if self.floor in self.multipliers and dragon_index < len(self.multipliers[self.floor]):
             return self.multipliers[self.floor][dragon_index]
@@ -96,7 +87,6 @@ class TowerGame:
             return self.multipliers[next_floor][dragon_index]
         return 1.0
 
-# Глобальный лок для доступа к файлу users_data.json
 users_data_lock = threading.Lock()
 
 def load_users_data():
@@ -119,21 +109,17 @@ def save_users_data(data):
     except Exception as e:
         logging.error(f"Ошибка сохранения данных: {e}")
 
-# Потокобезопасные словари
 active_tower_games = {}
 user_temp_data_tower = {}
 last_click_time_tower = {}
 tower_lock = threading.Lock()
-# Словарь для отслеживания обработки действий (защита от дублирования)
 processing_actions_tower = {}
 processing_lock_tower = threading.Lock()
 
-# Минимальная и максимальная ставка
-MIN_BET = 25  # Минимальная ставка 25 рублей
-MAX_BET = float('inf')  # Максимальная ставка не ограничена
+MIN_BET = 25
+MAX_BET = float('inf')
 
-# Таймаут неактивной игры (5 минут)
-GAME_TIMEOUT = 300  # 300 секунд = 5 минут
+GAME_TIMEOUT = 300
 
 def cleanup_inactive_tower_games():
     """Очистка неактивных игр и возврат ставок"""
@@ -142,25 +128,20 @@ def cleanup_inactive_tower_games():
     
     with tower_lock:
         for user_id, game in list(active_tower_games.items()):
-            # Проверяем, если игра существует более 5 минут без действий
             if current_time - game.created_time > GAME_TIMEOUT:
                 logging.info(f"Удаление неактивной игры Башня пользователя {user_id}, созданной {current_time - game.created_time:.1f} секунд назад")
                 games_to_remove.append((user_id, game))
     
-    # Обрабатываем удаление игр вне лока
     for user_id, game in games_to_remove:
         try:
-            # Возвращаем ставку
             users_data = load_users_data()
             if user_id in users_data:
                 users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + game.bet_amount, 2)
                 save_users_data(users_data)
                 logging.info(f"Возвращена ставка {game.bet_amount} пользователю {user_id} за неактивную игру Башня")
             
-            # Удаляем сообщение с игрой из чата
             if game.chat_id and game.message_id:
                 try:
-                    # Обновляем сообщение с информацией о возврате
                     timeout_message = f"""
 <blockquote expandable>╔══════════════════════╗
    ⏰ <b>ИГРА ЗАКРЫТА</b> ⏰
@@ -184,29 +165,24 @@ def cleanup_inactive_tower_games():
                         game.message_id,
                         parse_mode='HTML'
                     )
-                    time.sleep(2)  # Даем время пользователю прочитать
+                    time.sleep(2)
                 except Exception as e:
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения игры Башня {user_id}: {e}")
             
-            # Удаляем игру из активных игр
             with tower_lock:
                 if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
                     del active_tower_games[user_id]
             
-            # Удаляем временные данные
             with tower_lock:
                 if user_id in user_temp_data_tower:
                     del user_temp_data_tower[user_id]
             
-            # Очищаем историю кликов
             with tower_lock:
                 if user_id in last_click_time_tower:
                     del last_click_time_tower[user_id]
             
-            # Очищаем обработку действий
             with processing_lock_tower:
-                # Удаляем все действия этого пользователя
                 keys_to_remove = [k for k in processing_actions_tower.keys() if k.startswith(f"{user_id}_")]
                 for k in keys_to_remove:
                     del processing_actions_tower[k]
@@ -220,7 +196,7 @@ def start_cleanup_tower_thread():
         while True:
             try:
                 cleanup_inactive_tower_games()
-                time.sleep(60)  # Проверка каждую минуту
+                time.sleep(60)
             except Exception as e:
                 logging.error(f"Ошибка в cleanup_worker (Башня): {e}")
                 time.sleep(60)
@@ -236,7 +212,6 @@ def rate_limit_tower(user_id):
         if user_id in last_click_time_tower:
             if current_time - last_click_time_tower[user_id] < 0.4:
                 return False
-        # ВАЖНОЕ ИЗМЕНЕНИЕ: Обновляем время всегда
         last_click_time_tower[user_id] = current_time
     return True
 
@@ -245,11 +220,9 @@ def is_action_processing_tower(user_id, action_key=""):
     key = f"{user_id}_{action_key}"
     with processing_lock_tower:
         if key in processing_actions_tower:
-            # Если действие обрабатывалось менее 0.4 секунды назад
             if time.time() - processing_actions_tower[key] < 0.4:
                 return True
             else:
-                # Удаляем старые записи
                 del processing_actions_tower[key]
         return False
 
@@ -269,7 +242,7 @@ def clear_action_processing_tower(user_id, action_key=""):
 def get_bet_selection_keyboard_tower():
     """Клавиатура выбора ставки для башни"""
     markup = types.InlineKeyboardMarkup(row_width=5)
-    bets = ["25", "50", "125", "250", "500"]  # Те же ставки, что в минах
+    bets = ["25", "50", "125", "250", "500"]
     buttons = [types.InlineKeyboardButton(f"{bet_value}₽", callback_data=f"tower_bet_{bet_value}") for bet_value in bets]
     markup.row(*buttons)
     markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="tower_custom_bet"))
@@ -286,14 +259,11 @@ def get_dragons_selection_keyboard():
 def get_tower_keyboard(game, show_all=False, show_current_dragons=False):
     markup = types.InlineKeyboardMarkup(row_width=6)
 
-    # Создаем поле с множителями слева (только 6 этажей)
-    for floor_num in range(6, 0, -1):  # От 6 до 1
+    for floor_num in range(6, 0, -1):
         row_buttons = []
 
-        # Кнопка множителя слева
         dragon_index = game.dragons_count - 1
         multiplier = game.multipliers[floor_num][dragon_index]
-        # Форматируем множитель
         if multiplier < 10:
             mult_text = f"x{multiplier:.2f}"
         elif multiplier < 100:
@@ -304,51 +274,45 @@ def get_tower_keyboard(game, show_all=False, show_current_dragons=False):
         mult_button = types.InlineKeyboardButton(f"{mult_text}", callback_data="tower_ignore")
         row_buttons.append(mult_button)
 
-        # 5 клеток этажа
         for cell in range(5):
             if show_all:
-                # Показываем все поле после окончания игры
                 if floor_num in game.dragon_floors and cell in game.dragon_floors[floor_num]:
-                    emoji = "🐉"  # Дракон
+                    emoji = "🐉"
                 elif floor_num in game.selected_cells and cell in game.selected_cells[floor_num]:
-                    emoji = "💎"  # Выбранная ячейка
+                    emoji = "💎"
                 else:
-                    emoji = "◾"  # Белый квадрат для всех ячеек
+                    emoji = "◾"
                 callback_data = "tower_ignore"
 
             elif show_current_dragons and floor_num == game.floor:
-                # Показываем драконов на текущем этаже после успешного подъема
                 if cell in game.dragon_floors.get(floor_num, []):
-                    emoji = "🐉"  # Дракон на этом этаже
+                    emoji = "🐉"
                 elif cell in game.selected_cells.get(floor_num, []):
-                    emoji = "💎"  # Выбранная ячейка
+                    emoji = "💎"
                 else:
-                    emoji = "◾"  # Свободная ячейка
+                    emoji = "◾"
                 callback_data = "tower_ignore"
 
             else:
-                # Активная игра - ВСЕ ячейки белые
                 if floor_num == game.floor + 1:
-                    emoji = "☁️"  # Облачко для следующего этажа
+                    emoji = "☁️"
                     callback_data = f"tower_climb_{floor_num}_{cell}"
                 elif floor_num <= game.floor:
-                    # Пройденные этажи - показываем алмазы и драконы
                     if floor_num in game.dragon_floors and cell in game.dragon_floors[floor_num]:
-                        emoji = "🐉"  # Дракон на пройденном этаже
+                        emoji = "🐉"
                     elif floor_num in game.selected_cells and cell in game.selected_cells[floor_num]:
-                        emoji = "💎"  # Выбранная ячейка на пройденном этаже
+                        emoji = "💎"
                     else:
-                        emoji = "◾"  # Белый квадрат для непройденных ячеек
+                        emoji = "◾"
                     callback_data = "tower_ignore"
                 else:
-                    emoji = "◾"  # Белый квадрат для будущих этажей
+                    emoji = "◾"
                     callback_data = "tower_ignore"
 
             row_buttons.append(types.InlineKeyboardButton(emoji, callback_data=callback_data))
 
         markup.row(*row_buttons)
 
-    # Кнопка забрать (во время активной игры и после показа драконов)
     if (not show_all and game.floor > 0 and game.game_active) or show_current_dragons:
         current_mult = game.get_current_multiplier()
         markup.row(types.InlineKeyboardButton(
@@ -362,12 +326,10 @@ def format_tower_info(game):
     """Форматирует информацию об игре в красивый вид"""
     next_mult = game.get_next_multiplier()
     
-    # Рассчитываем время жизни игры
     game_lifetime = time.time() - game.created_time
     minutes = int(game_lifetime // 60)
     seconds = int(game_lifetime % 60)
     
-    # Время до автоудаления
     time_left = GAME_TIMEOUT - game_lifetime
     if time_left > 0:
         minutes_left = int(time_left // 60)
@@ -441,7 +403,6 @@ def format_tower_result(game, win_amount, is_win=False):
 <i>Дракон проснулся! Попробуйте еще раз! 💪</i>
 """
 
-# Создаем бота глобально для доступа из функций
 bot = None
 
 def cancel_tower_user_game(user_id, notify_user=True):
@@ -453,14 +414,12 @@ def cancel_tower_user_game(user_id, notify_user=True):
             
             game = active_tower_games[user_id]
             
-            # Возвращаем ставку
             users_data = load_users_data()
             if user_id in users_data:
                 users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + game.bet_amount, 2)
                 save_users_data(users_data)
                 logging.info(f"Принудительно возвращена ставка {game.bet_amount} пользователю {user_id} за игру Башня")
             
-            # Обновляем сообщение в чата
             if notify_user and game.chat_id and game.message_id:
                 try:
                     cancel_message = f"""
@@ -488,23 +447,19 @@ def cancel_tower_user_game(user_id, notify_user=True):
                 except Exception as e:
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения отмены Башня {user_id}: {e}")
-                        # Если не удалось отредактировать, отправляем новое сообщение
                         try:
                             bot.send_message(game.chat_id, cancel_message, parse_mode='HTML')
                         except:
                             pass
             
-            # Удаляем игру
             del active_tower_games[user_id]
             
-            # Очищаем связанные данные
             if user_id in user_temp_data_tower:
                 del user_temp_data_tower[user_id]
             
             if user_id in last_click_time_tower:
                 del last_click_time_tower[user_id]
             
-            # Очищаем обработку действий
             with processing_lock_tower:
                 keys_to_remove = [k for k in processing_actions_tower.keys() if k.startswith(f"{user_id}_")]
                 for k in keys_to_remove:
@@ -519,33 +474,27 @@ def cancel_tower_user_game(user_id, notify_user=True):
 def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=None, chat_id=None, message_id=None):
     """Функция для запуска игры через команду"""
     try:
-        # Проверяем ограничение по времени
         if not rate_limit_tower(user_id):
             if message:
                 bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
             return False
 
-        # Проверяем активную игру пользователя
         with tower_lock:
             if user_id in active_tower_games:
-                # Если есть старая неактивная игра - отменяем ее
                 game = active_tower_games[user_id]
                 current_time = time.time()
                 if current_time - game.created_time > GAME_TIMEOUT:
-                    # Автоматически отменяем старую игру
                     cancel_tower_user_game(user_id)
                 else:
                     if message:
                         bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
                     return False
 
-        # Проверяем количество драконов
         if dragons_count < 1 or dragons_count > 4:
             if message:
                 bot.send_message(message.chat.id, "❌ Количество драконов должно быть от 1 до 4!")
             return False
 
-        # Проверяем ставку
         if bet_amount < MIN_BET:
             if message:
                 bot.send_message(message.chat.id, f"❌ Минимальная ставка: {MIN_BET}₽")
@@ -563,7 +512,6 @@ def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=No
                 bot.send_message(message.chat.id, "❌ Недостаточно средств!")
             return False
 
-        # Создаем игру
         if message:
             game = TowerGame(user_id, dragons_count, bet_amount, chat_id=message.chat.id)
         elif chat_id:
@@ -574,7 +522,6 @@ def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=No
         with tower_lock:
             active_tower_games[user_id] = game
 
-        # Списываем ставку
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
 
@@ -585,7 +532,6 @@ def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=No
                 parse_mode='HTML',
                 reply_markup=get_tower_keyboard(game)
             )
-            # Сохраняем ID сообщения
             game.message_id = sent_message.message_id
         elif chat_id and message_id:
             try:
@@ -600,7 +546,6 @@ def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=No
             except Exception as e:
                 if "message is not modified" not in str(e):
                     logging.error(f"Ошибка edit_message_text при запуске игры Башня: {e}")
-                    # Если не удалось отредактировать, отправляем новое сообщение
                     sent_message = bot.send_message(
                         chat_id,
                         format_tower_info(game),
@@ -627,28 +572,23 @@ def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=No
 def parse_tower_command(text):
     """Парсит команду /башня или /tower и возвращает (количество_драконов, сумма_ставки)"""
     try:
-        # Убираем команду и разделяем аргументы
         parts = text.strip().split()
         
         if len(parts) < 3:
             return None, None
         
-        # Проверяем оба варианта команд
         command_lower = parts[0].lower()
         valid_commands = ['/башня', '/tower', 'башня', 'tower', '/лесенка', 'лесенка', '/лестница', 'лестница']
         
         if command_lower not in valid_commands:
             return None, None
         
-        # Пытаемся получить количество драконов и ставку
         dragons_count = None
         bet_amount = None
         
-        # Пробуем разные варианты парсинга
         for i in range(1, len(parts)):
             if not dragons_count:
                 try:
-                    # Пробуем конвертировать в число
                     dragons_count = int(parts[i])
                     if not (1 <= dragons_count <= 4):
                         dragons_count = None
@@ -673,10 +613,8 @@ def register_tower_handlers(bot_instance):
     global bot
     bot = bot_instance
     
-    # Запускаем поток очистки
     start_cleanup_tower_thread()
 
-    # Обработчик команд /башня, /tower, /лесенка, /лестница
     @bot.message_handler(func=lambda message: message.text and 
                         any(message.text.lower().startswith(cmd + ' ') or 
                             message.text.lower() == cmd for cmd in 
@@ -685,11 +623,9 @@ def register_tower_handlers(bot_instance):
     def tower_command_handler(message):
         user_id = str(message.from_user.id)
         
-        # Парсим команду
         dragons_count, bet_amount = parse_tower_command(message.text)
         
         if dragons_count is None or bet_amount is None:
-            # Если не удалось распарсить, показываем справку
             help_text = """<blockquote expandable>╔══════════════════════╗
    🏰 <b>ИГРА БАШНЯ</b> 🏰
 ╚══════════════════════╝</blockquote>
@@ -715,26 +651,21 @@ def register_tower_handlers(bot_instance):
             bot.send_message(message.chat.id, help_text, parse_mode='HTML')
             return
         
-        # Запускаем игру с полученными параметрами
         start_tower_game_from_command(user_id, dragons_count, bet_amount, message=message)
 
     def process_custom_bet(message):
         try:
             user_id = str(message.from_user.id)
 
-            # Проверяем ограничение по времени
             if not rate_limit_tower(user_id):
                 bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
                 return
 
-            # Проверяем активную игру пользователя
             with tower_lock:
                 if user_id in active_tower_games:
-                    # Проверяем, не устарела ли игра
                     game = active_tower_games[user_id]
                     current_time = time.time()
                     if current_time - game.created_time > GAME_TIMEOUT:
-                        # Автоматически отменяем старую игру
                         cancel_tower_user_game(user_id)
                     else:
                         bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -785,7 +716,6 @@ def register_tower_handlers(bot_instance):
         try:
             user_id = str(message.from_user.id)
 
-            # Проверяем ограничение по времени
             if not rate_limit_tower(user_id):
                 bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
                 return
@@ -797,14 +727,11 @@ def register_tower_handlers(bot_instance):
 
             users_data = load_users_data()
 
-            # Проверяем активную игру пользователя
             with tower_lock:
                 if user_id in active_tower_games:
-                    # Проверяем, не устарела ли игра
                     game = active_tower_games[user_id]
                     current_time = time.time()
                     if current_time - game.created_time > GAME_TIMEOUT:
-                        # Автоматически отменяем старую игру
                         cancel_tower_user_game(user_id)
                     else:
                         bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -821,7 +748,6 @@ def register_tower_handlers(bot_instance):
                 bot.send_message(message.chat.id, "❌ Недостаточно средств!")
                 return
 
-            # Запускаем игру через универсальную функцию
             success = start_tower_game_from_command(
                 user_id=user_id,
                 dragons_count=dragons_count,
@@ -844,19 +770,15 @@ def register_tower_handlers(bot_instance):
     def tower_start_internal(message):
         user_id = str(message.from_user.id)
 
-        # Проверяем ограничение по времени
         if not rate_limit_tower(user_id):
             bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
             return
 
-        # Проверяем активную игру пользователя
         with tower_lock:
             if user_id in active_tower_games:
-                # Проверяем, не устарела ли игра
                 game = active_tower_games[user_id]
                 current_time = time.time()
                 if current_time - game.created_time > GAME_TIMEOUT:
-                    # Автоматически отменяем старую игру
                     cancel_tower_user_game(user_id)
                 else:
                     bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -891,7 +813,6 @@ def register_tower_handlers(bot_instance):
         try:
             user_id = str(call.from_user.id)
 
-            # ЗАЩИТА ОТ ДУБЛИРОВАНИЯ ДЕЙСТВИЙ
             action_key = ""
             if call.data.startswith("tower_climb_"):
                 parts = call.data.split('_')
@@ -909,7 +830,6 @@ def register_tower_handlers(bot_instance):
             else:
                 action_key = call.data
 
-            # Проверяем, не обрабатывается ли уже это действие
             if is_action_processing_tower(user_id, action_key):
                 try:
                     bot.answer_callback_query(call.id, "⏳ Действие уже обрабатывается...", show_alert=False)
@@ -917,20 +837,16 @@ def register_tower_handlers(bot_instance):
                     pass
                 return
 
-            # Отмечаем начало обработки
             mark_action_processing_tower(user_id, action_key)
 
             users_data = load_users_data()
 
             if call.data.startswith("tower_bet_"):
-                # Проверяем активную игру пользователя
                 with tower_lock:
                     if user_id in active_tower_games:
-                        # Проверяем, не устарела ли игра
                         game = active_tower_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            # Автоматически отменяем старую игру
                             cancel_tower_user_game(user_id)
                         else:
                             try:
@@ -978,14 +894,11 @@ def register_tower_handlers(bot_instance):
             elif call.data.startswith("tower_dragons_"):
                 dragons_count = int(call.data.split("_")[2])
 
-                # Проверяем активную игру пользователя
                 with tower_lock:
                     if user_id in active_tower_games:
-                        # Проверяем, не устарела ли игра
                         game = active_tower_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            # Автоматически отменяем старую игру
                             cancel_tower_user_game(user_id)
                         else:
                             try:
@@ -1014,7 +927,6 @@ def register_tower_handlers(bot_instance):
                     clear_action_processing_tower(user_id, action_key)
                     return
 
-                # Запускаем игру через универсальную функцию
                 success = start_tower_game_from_command(
                     user_id=user_id,
                     dragons_count=dragons_count,
@@ -1032,14 +944,11 @@ def register_tower_handlers(bot_instance):
                 return
 
             elif call.data == "tower_custom_bet":
-                # Проверяем активную игру пользователя
                 with tower_lock:
                     if user_id in active_tower_games:
-                        # Проверяем, не устарела ли игра
                         game = active_tower_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            # Автоматически отменяем старую игру
                             cancel_tower_user_game(user_id)
                         else:
                             try:
@@ -1075,14 +984,11 @@ def register_tower_handlers(bot_instance):
                 return
 
             elif call.data == "tower_custom_dragons":
-                # Проверяем активную игру пользователя
                 with tower_lock:
                     if user_id in active_tower_games:
-                        # Проверяем, не устарела ли игра
                         game = active_tower_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            # Автоматически отменяем старую игру
                             cancel_tower_user_game(user_id)
                         else:
                             try:
@@ -1129,7 +1035,6 @@ def register_tower_handlers(bot_instance):
 
                     game = active_tower_games[user_id]
 
-                # Проверяем, активна ли игра
                 if not game.game_active:
                     try:
                         bot.answer_callback_query(call.id, "❌ Игра уже завершена!")
@@ -1142,9 +1047,7 @@ def register_tower_handlers(bot_instance):
                 floor_num = int(parts[2])
                 cell_num = int(parts[3])
 
-                # Используем лок игры для защиты от конкурентного доступа
                 with game.action_lock:
-                    # Проверяем время последнего действия в игре
                     current_time = time.time()
                     if current_time - game.last_action_time < 0.4:
                         try:
@@ -1156,17 +1059,14 @@ def register_tower_handlers(bot_instance):
                     
                     game.last_action_time = current_time
                     
-                    # Добавляем выбранную ячейку
                     game.add_selected_cell(floor_num, cell_num)
 
-                    # Поднимаемся на этаж и проверяем результат
                     success = game.climb_floor(cell_num)
 
                     if not success:
                         users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
                         save_users_data(users_data)
 
-                        # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
                         try:
                             add_game_to_history(
                                 user_id=int(user_id),
@@ -1178,7 +1078,6 @@ def register_tower_handlers(bot_instance):
                         except Exception as e:
                             logging.error(f"Ошибка записи проигрыша в историю: {e}")
 
-                        # Удаляем игру из активных
                         with tower_lock:
                             if user_id in active_tower_games:
                                 del active_tower_games[user_id]
@@ -1225,7 +1124,6 @@ def register_tower_handlers(bot_instance):
 
                     game = active_tower_games[user_id]
 
-                # Проверяем, активна ли игра
                 if not game.game_active:
                     try:
                         bot.answer_callback_query(call.id, "❌ Игра уже завершена!")
@@ -1234,9 +1132,7 @@ def register_tower_handlers(bot_instance):
                     clear_action_processing_tower(user_id, action_key)
                     return
 
-                # Используем лок игры для защиты от конкурентного доступа
                 with game.action_lock:
-                    # Проверяем время последнего действия в игре
                     current_time = time.time()
                     if current_time - game.last_action_time < 0.4:
                         try:
@@ -1248,14 +1144,12 @@ def register_tower_handlers(bot_instance):
                     
                     game.last_action_time = current_time
                     
-                    # Помечаем игру как завершенную ПЕРЕД начислением
                     game.game_active = False
                     
                     win_amount = game.bet_amount * game.get_current_multiplier()
                     users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + win_amount, 2)
                     save_users_data(users_data)
 
-                    # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
                     try:
                         add_game_to_history(
                             user_id=int(user_id),
@@ -1267,13 +1161,11 @@ def register_tower_handlers(bot_instance):
                     except Exception as e:
                         logging.error(f"Ошибка записи выигрыша в историю: {e}")
 
-                    # ДОБАВЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС (6% от выигрыша) в отдельном потоке
                     threading.Thread(
                         target=lambda: referrals.add_referral_bonus(user_id, win_amount),
                         daemon=True
                     ).start()
 
-                    # Удаляем игру из активных
                     with tower_lock:
                         if user_id in active_tower_games:
                             del active_tower_games[user_id]
@@ -1294,7 +1186,6 @@ def register_tower_handlers(bot_instance):
                     return
 
             elif call.data == "tower_ignore":
-                # Игнорируем нажатия на уже открытые клетки
                 try:
                     bot.answer_callback_query(call.id)
                 except:
@@ -1304,11 +1195,9 @@ def register_tower_handlers(bot_instance):
                 return
 
         except Exception as e:
-            # Общая обработка ошибок
             if "query is too old" in str(e) or "query ID is invalid" in str(e):
                 return
             elif "message is not modified" in str(e):
-                # Это нормальная ситуация - игрок быстро нажимает
                 pass
             else:
                 logging.error(f"Ошибка в tower_callback_handler: {e}")
@@ -1316,27 +1205,21 @@ def register_tower_handlers(bot_instance):
                     bot.answer_callback_query(call.id, "❌ Произошла ошибка!")
                 except:
                     pass
-            # Всегда очищаем обработку
             clear_action_processing_tower(user_id, action_key if 'action_key' in locals() else "")
 
-# Публичная функция для запуска игры из main.py
 def tower_start(message):
     """Функция для запуска игры Башня из внешних модулей"""
     user_id = str(message.from_user.id)
 
-    # Проверяем ограничение по времени
     if not rate_limit_tower(user_id):
         bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
         return
 
-    # Проверяем активную игру пользователя
     with tower_lock:
         if user_id in active_tower_games:
-            # Проверяем, не устарела ли игра
             game = active_tower_games[user_id]
             current_time = time.time()
             if current_time - game.created_time > GAME_TIMEOUT:
-                # Автоматически отменяем старую игру
                 cancel_tower_user_game(user_id)
             else:
                 bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -1366,12 +1249,10 @@ def tower_start(message):
         reply_markup=get_bet_selection_keyboard_tower()
     )
 
-# Экспортируем функцию для принудительной отмены игры
 def cancel_tower_game(user_id):
     """Внешняя функция для отмены игры пользователя"""
     return cancel_tower_user_game(str(user_id))
 
-# Экспортируем функцию для получения списка активных игр
 def get_active_tower_games():
     """Возвращает список активных игр (для админки)"""
     with tower_lock:
