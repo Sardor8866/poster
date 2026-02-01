@@ -43,13 +43,6 @@ WEBHOOK_URL_PATH = f"/webhook/{bot.token}/"
 
 app = Flask(__name__)
 
-leaders.register_leaders_handlers(bot)
-mines.register_mines_handlers(bot)
-tower.register_tower_handlers(bot)
-register_referrals_handlers(bot)
-register_admin_handlers(bot)
-register_games_handlers(bot)
-
 if PAYMENTS_ENABLED:
     register_crypto_handlers(bot)
     print("Хендлеры платежей зарегистрированы")
@@ -808,6 +801,13 @@ def callback_handler(call):
 
     elif call.data == "withdraw":
         bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
+
+leaders.register_leaders_handlers(bot)
+mines.register_mines_handlers(bot)
+tower.register_tower_handlers(bot)
+register_referrals_handlers(bot)
+register_admin_handlers(bot)
+register_games_handlers(bot)
 
 print("🔥 Flame Game запущен...")
 print(f"Модуль платежей: {'ВКЛЮЧЕН' if PAYMENTS_ENABLED else 'ОТКЛЮЧЕН'}")
