@@ -30,9 +30,9 @@ class TowerGame:
             1: [1.2, 1.6, 2.3, 4.7],
             2: [1.5, 2.4, 6.0, 24.0],
             3: [1.8, 4.2, 16.0, 120.0],
-            4: [2.4, 7.0, 42.0, 400.0],
-            5: [3.2, 12.5, 90.0, 1600.0],
-            6: [3.9, 20.0, 160.0, 3000.0]
+            4: [2.35, 7.0, 42.0, 400.0],
+            5: [3.15, 12.5, 90.0, 1600.0],
+            6: [3.6, 20.0, 160.0, 3000.0]
         }
         self.mine_floors = {}
         self.selected_cells = {}
@@ -1262,3 +1262,4 @@ def get_active_tower_games():
             'chat_id': game.chat_id,
             'message_id': game.message_id
         } for user_id, game in active_tower_games.items()}
+
