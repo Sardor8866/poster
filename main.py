@@ -105,16 +105,14 @@ def games_inline_menu(user_id):
     )
 
     markup.row(
-        types.InlineKeyboardButton("🚀 Краш", callback_data="game_crash"),
-        types.InlineKeyboardButton("🎯 Дартс", callback_data="games_darts")
+        types.InlineKeyboardButton("🎯 Дартс", callback_data="games_darts"),
+        types.InlineKeyboardButton("🏀 Баскетбол", callback_data="games_basketball")
     )
 
     markup.row(
-        types.InlineKeyboardButton("🏀 Баскетбол", callback_data="games_basketball"),
-        types.InlineKeyboardButton("⚽ Футбол", callback_data="games_football")
+        types.InlineKeyboardButton("⚽ Футбол", callback_data="games_football"),
+        types.InlineKeyboardButton("🎲 Кости", callback_data="games_dice")
     )
-
-    markup.row(types.InlineKeyboardButton("🎲 Кости", callback_data="games_dice"))
 
     return balance_text, markup
 
@@ -765,11 +763,15 @@ Flame Game - это современная игровая
     else:
         bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data in ["game_mines", "game_tower", "game_crash", "deposit", "withdraw"])
+@bot.callback_query_handler(func=lambda call: call.data in ["game_mines", "game_tower", "deposit", "withdraw"])
 def callback_handler(call):
     user_id = str(call.from_user.id)
 
     if call.data == "game_mines":
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
         try:
             from mines import mines_start
             fake_message = type('obj', (object,), {
@@ -785,6 +787,10 @@ def callback_handler(call):
 
     elif call.data == "game_tower":
         try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        try:
             from tower import tower_start
             fake_message = type('obj', (object,), {
                 'chat': type('obj', (object,), {'id': call.message.chat.id}),
@@ -795,20 +801,6 @@ def callback_handler(call):
             tower_start(fake_message)
         except Exception as e:
             print(f"Ошибка запуска игры Башня: {e}")
-            bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
-
-    elif call.data == "game_crash":
-        try:
-            from crash import crash_start
-            fake_message = type('obj', (object,), {
-                'chat': type('obj', (object,), {'id': call.message.chat.id}),
-                'from_user': call.from_user,
-                'message_id': call.message.message_id,
-                'text': "🚀 Краш"
-            })()
-            crash_start(fake_message)
-        except Exception as e:
-            print(f"Ошибка запуска игры Краш: {e}")
             bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
 
     elif call.data == "deposit":
