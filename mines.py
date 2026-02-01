@@ -8,19 +8,15 @@ import logging
 import hashlib
 from contextlib import contextmanager
 
-# Добавляем импорт модуля referrals
-import referrals  # ИМПОРТ ДЛЯ РЕФЕРАЛЬНЫХ БОНУСОВ
+import referrals
 
-# Импорт функций из модуля лидеров
 try:
     from leaders import add_game_to_history
 except ImportError:
-    # Функция-заглушка, если модуль лидеров не найден
     def add_game_to_history(user_id, bet_amount, win_amount, is_win, game_type="mines"):
         logging.warning(f"Модуль лидеров не найден, игра не записана в историю: {user_id}")
         return False
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class MinesGame:
@@ -35,21 +31,20 @@ class MinesGame:
         self.multiplier = 1.0
         self.previous_multiplier = 1.0
         self.opened_cells = 0
-        self.game_active = True  # Флаг активности игры
+        self.game_active = True
         self.session_token = generate_session_token(user_id, 'mines')
         self.place_mines()
-        self.last_action_time = time.time()  # Время последнего действия
-        self.action_lock = threading.Lock()  # Лок для защиты от конкурентных действий
-        self.created_time = time.time()  # Время создания игры
-        self.chat_id = chat_id  # ID чата с игрой
-        self.message_id = message_id  # ID сообщения с игрой
+        self.last_action_time = time.time()
+        self.action_lock = threading.Lock()
+        self.created_time = time.time()
+        self.chat_id = chat_id
+        self.message_id = message_id
 
     def place_mines(self):
         positions = [(i, j) for i in range(self.grid_size) for j in range(self.grid_size)]
         self.mines_positions = random.sample(positions, self.mines_count)
 
     def get_multiplier_for_opened_cells(self, opened_safe_cells):
-        # Множители для каждого количества мин (количество безопасных ячеек = 25 - mines_count)
         multipliers = {
             2: [1.10, 1.22, 1.36, 1.52, 1.71, 1.93, 2.19, 2.50, 2.87, 3.32, 3.87, 4.55, 5.39, 6.45, 7.80, 9.55, 11.85, 14.95, 19.25, 25.25, 33.75, 55.75, 83.25],
             3: [1.15, 1.33, 1.55, 1.82, 2.15, 2.56, 3.07, 3.72, 4.55, 5.62, 7.02, 8.87, 11.35, 14.70, 25.30, 36.70, 49.80, 79.10, 99.80, 137.50, 195.00, 415.00],
@@ -96,7 +91,7 @@ class MinesGame:
         self.previous_multiplier = self.multiplier
 
         if (x, y) in self.mines_positions:
-            self.game_active = False  # Игра завершается при попадании на мину
+            self.game_active = False
             return False
 
         self.opened_cells += 1
@@ -108,7 +103,6 @@ class MinesGame:
         next_opened = self.opened_cells + 1
         return self.get_multiplier_for_opened_cells(next_opened)
 
-# Глобальный лок для доступа к файлу users_data.json
 users_data_lock = threading.Lock()
 
 def load_users_data():
@@ -137,21 +131,17 @@ def generate_session_token(user_id, game_type):
     data = f"{user_id}_{game_type}_{timestamp}"
     return hashlib.md5(data.encode()).hexdigest()[:8]
 
-# Потокобезопасные словари
 active_games = {}
 user_temp_data = {}
 last_click_time = {}
 mines_lock = threading.Lock()
-# Словарь для отслеживания обработки действий (защита от дублирования)
 processing_actions = {}
 processing_lock = threading.Lock()
 
-# Минимальная и максимальная ставка
-MIN_BET = 25  # Минимальная ставка 25 рублей
-MAX_BET = float('inf')  # Максимальная ставка не ограничена
+MIN_BET = 25
+MAX_BET = float('inf')
 
-# Таймаут неактивной игры (5 минут)
-GAME_TIMEOUT = 300  # 300 секунд = 5 минут
+GAME_TIMEOUT = 300
 
 def cleanup_inactive_games():
     """Очистка неактивных игр и возврат ставок"""
@@ -160,25 +150,20 @@ def cleanup_inactive_games():
     
     with mines_lock:
         for user_id, game in list(active_games.items()):
-            # Проверяем, если игра существует более 5 минут без действий
             if current_time - game.created_time > GAME_TIMEOUT:
                 logging.info(f"Удаление неактивной игры пользователя {user_id}, созданной {current_time - game.created_time:.1f} секунд назад")
                 games_to_remove.append((user_id, game))
     
-    # Обрабатываем удаление игр вне лока
     for user_id, game in games_to_remove:
         try:
-            # Возвращаем ставку
             users_data = load_users_data()
             if user_id in users_data:
                 users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + game.bet_amount, 2)
                 save_users_data(users_data)
                 logging.info(f"Возвращена ставка {game.bet_amount} пользователю {user_id} за неактивную игру")
             
-            # Удаляем сообщение с игрой из чата
             if game.chat_id and game.message_id:
                 try:
-                    # Сначала обновляем сообщение с информацией о возврате
                     timeout_message = f"""
 <blockquote expandable>╔══════════════════════╗
    ⏰ <b>ИГРА ЗАКРЫТА</b> ⏰
@@ -202,29 +187,24 @@ def cleanup_inactive_games():
                         game.message_id,
                         parse_mode='HTML'
                     )
-                    time.sleep(3)  # Даем время пользователю прочитать
+                    time.sleep(3)
                 except Exception as e:
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения игры {user_id}: {e}")
             
-            # Удаляем игру из активных игр
             with mines_lock:
                 if user_id in active_games and active_games[user_id].session_token == game.session_token:
                     del active_games[user_id]
             
-            # Удаляем временные данные
             with mines_lock:
                 if user_id in user_temp_data:
                     del user_temp_data[user_id]
             
-            # Очищаем историю кликов
             with mines_lock:
                 if user_id in last_click_time:
                     del last_click_time[user_id]
             
-            # Очищаем обработку действий
             with processing_lock:
-                # Удаляем все действия этого пользователя
                 keys_to_remove = [k for k in processing_actions.keys() if k.startswith(f"{user_id}_")]
                 for k in keys_to_remove:
                     del processing_actions[k]
@@ -238,7 +218,7 @@ def start_cleanup_thread():
         while True:
             try:
                 cleanup_inactive_games()
-                time.sleep(60)  # Проверка каждую минуту
+                time.sleep(60)
             except Exception as e:
                 logging.error(f"Ошибка в cleanup_worker: {e}")
                 time.sleep(60)
@@ -252,9 +232,8 @@ def rate_limit_mines(user_id):
     current_time = time.time()
     with mines_lock:
         if user_id in last_click_time:
-            if current_time - last_click_time[user_id] < 0.3:  # УВЕЛИЧЕНО ДО 0.3
+            if current_time - last_click_time[user_id] < 0.3:
                 return False
-        # ВАЖНОЕ ИЗМЕНЕНИЕ: Обновляем время только если не было ограничения
         last_click_time[user_id] = current_time
     return True
 
@@ -263,11 +242,9 @@ def is_action_processing(user_id, action_key=""):
     key = f"{user_id}_{action_key}"
     with processing_lock:
         if key in processing_actions:
-            # Если действие обрабатывалось менее 0.3 секунды назад
-            if time.time() - processing_actions[key] < 0.3:  # УВЕЛИЧЕНО ДО 0.3
+            if time.time() - processing_actions[key] < 0.3:
                 return True
             else:
-                # Удаляем старые записи
                 del processing_actions[key]
         return False
 
@@ -287,7 +264,7 @@ def clear_action_processing(user_id, action_key=""):
 def get_bet_selection_keyboard():
     """Клавиатура выбора ставки с новыми значениями"""
     markup = types.InlineKeyboardMarkup(row_width=5)
-    bets = ["25", "50", "125", "250", "500"]  # Новые значения ставок
+    bets = ["25", "50", "125", "250", "500"]
     buttons = [types.InlineKeyboardButton(f"{bet}₽", callback_data=f"mine_bet_{bet}") for bet in bets]
     markup.row(*buttons)
     markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="mine_custom_bet"))
@@ -352,12 +329,10 @@ def format_game_info(game):
     """Форматирует информацию об игре в красивый вид"""
     next_mult = game.get_next_multiplier()
     
-    # Рассчитываем время жизни игры
     game_lifetime = time.time() - game.created_time
     minutes = int(game_lifetime // 60)
     seconds = int(game_lifetime % 60)
     
-    # Время до автоудаления
     time_left = GAME_TIMEOUT - game_lifetime
     if time_left > 0:
         minutes_left = int(time_left // 60)
@@ -431,7 +406,6 @@ def format_game_result(game, win_amount, is_win=False):
 <i>Не повезло в этот раз! Попробуйте еще! 💪</i>
 """
 
-# Создаем бота глобально для доступа из функций
 bot = None
 
 def cancel_user_game(user_id, notify_user=True):
@@ -443,14 +417,12 @@ def cancel_user_game(user_id, notify_user=True):
             
             game = active_games[user_id]
             
-            # Возвращаем ставку
             users_data = load_users_data()
             if user_id in users_data:
                 users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + game.bet_amount, 2)
                 save_users_data(users_data)
                 logging.info(f"Принудительно возвращена ставка {game.bet_amount} пользователю {user_id}")
             
-            # Обновляем сообщение в чате
             if notify_user and game.chat_id and game.message_id:
                 try:
                     cancel_message = f"""
@@ -478,23 +450,19 @@ def cancel_user_game(user_id, notify_user=True):
                 except Exception as e:
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения отмены {user_id}: {e}")
-                        # Если не удалось отредактировать, отправляем новое сообщение
                         try:
                             bot.send_message(game.chat_id, cancel_message, parse_mode='HTML')
                         except:
                             pass
             
-            # Удаляем игру
             del active_games[user_id]
             
-            # Очищаем связанные данные
             if user_id in user_temp_data:
                 del user_temp_data[user_id]
             
             if user_id in last_click_time:
                 del last_click_time[user_id]
             
-            # Очищаем обработку действий
             with processing_lock:
                 keys_to_remove = [k for k in processing_actions.keys() if k.startswith(f"{user_id}_")]
                 for k in keys_to_remove:
@@ -509,33 +477,27 @@ def cancel_user_game(user_id, notify_user=True):
 def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None, chat_id=None, message_id=None):
     """Функция для запуска игры через команду"""
     try:
-        # Проверяем ограничение по времени
         if not rate_limit_mines(user_id):
             if message:
                 bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
             return False
 
-        # Проверяем активную игру пользователя
         with mines_lock:
             if user_id in active_games:
-                # Если есть старая неактивная игра - отменяем ее
                 game = active_games[user_id]
                 current_time = time.time()
                 if current_time - game.created_time > GAME_TIMEOUT:
-                    # Автоматически отменяем старую игру
                     cancel_user_game(user_id)
                 else:
                     if message:
                         bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
                     return False
 
-        # Проверяем количество мин
         if mines_count < 2 or mines_count > 24:
             if message:
                 bot.send_message(message.chat.id, "❌ Количество мин должно быть от 2 до 24!")
             return False
 
-        # Проверяем ставку
         if bet_amount < MIN_BET:
             if message:
                 bot.send_message(message.chat.id, f"❌ Минимальная ставка: {MIN_BET}₽")
@@ -553,7 +515,6 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
                 bot.send_message(message.chat.id, "❌ Недостаточно средств!")
             return False
 
-        # Создаем игру
         if message:
             game = MinesGame(user_id, mines_count, bet_amount, chat_id=message.chat.id)
         elif chat_id:
@@ -564,7 +525,6 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
         with mines_lock:
             active_games[user_id] = game
 
-        # Списываем ставку
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
 
@@ -575,7 +535,6 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
                 parse_mode='HTML',
                 reply_markup=get_game_keyboard(game)
             )
-            # Сохраняем ID сообщения
             game.message_id = sent_message.message_id
         elif chat_id and message_id:
             try:
@@ -590,7 +549,6 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
             except Exception as e:
                 if "message is not modified" not in str(e):
                     logging.error(f"Ошибка edit_message_text при запуске игры: {e}")
-                    # Если не удалось отредактировать, отправляем новое сообщение
                     sent_message = bot.send_message(
                         chat_id,
                         format_game_info(game),
@@ -617,25 +575,20 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
 def parse_mines_command(text):
     """Парсит команду /мины или /mines и возвращает (количество_мин, сумма_ставки)"""
     try:
-        # Убираем команду и разделяем аргументы
         parts = text.strip().split()
         
         if len(parts) < 3:
             return None, None
         
-        # Проверяем оба варианта команд
         if parts[0].lower() not in ['/мины', '/mines', 'мины', 'mines']:
             return None, None
         
-        # Пытаемся получить количество мин и ставку
         mines_count = None
         bet_amount = None
         
-        # Пробуем разные варианты парсинга
         for i in range(1, len(parts)):
             if not mines_count:
                 try:
-                    # Пробуем конвертировать в число
                     mines_count = int(parts[i])
                     if not (2 <= mines_count <= 24):
                         mines_count = None
@@ -660,10 +613,8 @@ def register_mines_handlers(bot_instance):
     global bot
     bot = bot_instance
     
-    # Запускаем поток очистки
     start_cleanup_thread()
 
-    # Обработчик команды /мины или /mines
     @bot.message_handler(func=lambda message: message.text and 
                         (message.text.lower().startswith('/мины') or 
                          message.text.lower().startswith('/mines') or
@@ -672,11 +623,9 @@ def register_mines_handlers(bot_instance):
     def mines_command_handler(message):
         user_id = str(message.from_user.id)
         
-        # Парсим команду
         mines_count, bet_amount = parse_mines_command(message.text)
         
         if mines_count is None or bet_amount is None:
-            # Если не удалось распарсить, показываем справку
             help_text = """<blockquote expandable>╔══════════════════════╗
    💣 <b>ИГРА МИНЫ</b> 💣
 ╚══════════════════════╝</blockquote>
@@ -700,14 +649,12 @@ def register_mines_handlers(bot_instance):
             bot.send_message(message.chat.id, help_text, parse_mode='HTML')
             return
         
-        # Запускаем игру с полученными параметрами
         start_mines_game_from_command(user_id, mines_count, bet_amount, message=message)
 
     def process_custom_bet(message):
         try:
             user_id = str(message.from_user.id)
 
-            # Проверяем ограничение по времени
             if not rate_limit_mines(user_id):
                 bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
                 return
@@ -757,7 +704,6 @@ def register_mines_handlers(bot_instance):
         try:
             user_id = str(message.from_user.id)
 
-            # Проверяем ограничение по времени
             if not rate_limit_mines(user_id):
                 bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
                 return
@@ -769,14 +715,11 @@ def register_mines_handlers(bot_instance):
 
             users_data = load_users_data()
 
-            # Проверяем активную игру пользователя
             with mines_lock:
                 if user_id in active_games:
-                    # Проверяем, не устарела ли игра
                     game = active_games[user_id]
                     current_time = time.time()
                     if current_time - game.created_time > GAME_TIMEOUT:
-                        # Автоматически отменяем старую игру
                         cancel_user_game(user_id)
                     else:
                         bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -793,7 +736,6 @@ def register_mines_handlers(bot_instance):
                 bot.send_message(message.chat.id, "❌ Недостаточно средств!")
                 return
 
-            # Запускаем игру через универсальную функцию
             success = start_mines_game_from_command(
                 user_id=user_id,
                 mines_count=mines_count,
@@ -816,19 +758,15 @@ def register_mines_handlers(bot_instance):
     def mines_start_internal(message):
         user_id = str(message.from_user.id)
 
-        # Проверяем ограничение по времени
         if not rate_limit_mines(user_id):
             bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
             return
 
-        # Проверяем активную игру пользователя
         with mines_lock:
             if user_id in active_games:
-                # Проверяем, не устарела ли игра
                 game = active_games[user_id]
                 current_time = time.time()
                 if current_time - game.created_time > GAME_TIMEOUT:
-                    # Автоматически отменяем старую игру
                     cancel_user_game(user_id)
                 else:
                     bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -863,14 +801,9 @@ def register_mines_handlers(bot_instance):
         try:
             user_id = str(call.from_user.id)
 
-            # ВАЖНОЕ ИЗМЕНЕНИЕ: Проверяем ограничение по времени ВНУТРИ обработчика
-            # для каждого типа кнопки отдельно
             
-            # ЗАЩИТА ОТ ДУБЛИРОВАНИЯ ДЕЙСТВИЙ
-            # Создаем уникальный ключ для этого действия
             action_key = ""
             if call.data.startswith("mine_cell_"):
-                # Для кликов по клеткам используем координаты
                 parts = call.data.split("_")
                 x, y = int(parts[2]), int(parts[3])
                 action_key = f"cell_{x}_{y}"
@@ -885,7 +818,6 @@ def register_mines_handlers(bot_instance):
             else:
                 action_key = call.data
 
-            # Проверяем, не обрабатывается ли уже это действие
             if is_action_processing(user_id, action_key):
                 try:
                     bot.answer_callback_query(call.id, "⏳ Действие уже обрабатывается...", show_alert=False)
@@ -893,18 +825,14 @@ def register_mines_handlers(bot_instance):
                     pass
                 return
 
-            # Отмечаем начало обработки
             mark_action_processing(user_id, action_key)
 
             if call.data.startswith("mine_bet_"):
-                # Проверяем активную игру пользователя
                 with mines_lock:
                     if user_id in active_games:
-                        # Проверяем, не устарела ли игра
                         game = active_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            # Автоматически отменяем старую игру
                             cancel_user_game(user_id)
                         else:
                             try:
@@ -951,17 +879,13 @@ def register_mines_handlers(bot_instance):
                 return
 
             elif call.data.startswith("mine_count_"):
-                # ИСПРАВЛЕНО: ВАЖНО - обработка выбора количества мин из меню
                 mines_count = int(call.data.split("_")[2])
 
-                # Проверяем активную игру пользователя
                 with mines_lock:
                     if user_id in active_games:
-                        # Проверяем, не устарела ли игра
                         game = active_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            # Автоматически отменяем старую игру
                             cancel_user_game(user_id)
                         else:
                             try:
@@ -991,7 +915,6 @@ def register_mines_handlers(bot_instance):
                     clear_action_processing(user_id, action_key)
                     return
 
-                # Запускаем игру через универсальную функцию
                 success = start_mines_game_from_command(
                     user_id=user_id,
                     mines_count=mines_count,
@@ -1009,14 +932,11 @@ def register_mines_handlers(bot_instance):
                 return
 
             elif call.data == "mine_custom_bet":
-                # Проверяем активную игру пользователя
                 with mines_lock:
                     if user_id in active_games:
-                        # Проверяем, не устарела ли игра
                         game = active_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            # Автоматически отменяем старую игру
                             cancel_user_game(user_id)
                         else:
                             try:
@@ -1052,14 +972,11 @@ def register_mines_handlers(bot_instance):
                 return
 
             elif call.data == "mine_custom_count":
-                # Проверяем активную игру пользователя
                 with mines_lock:
                     if user_id in active_games:
-                        # Проверяем, не устарела ли игра
                         game = active_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            # Автоматически отменяем старую игру
                             cancel_user_game(user_id)
                         else:
                             try:
@@ -1094,7 +1011,6 @@ def register_mines_handlers(bot_instance):
                     clear_action_processing(user_id, action_key)
                 return
 
-            # Проверяем наличие активной игры
             with mines_lock:
                 if user_id not in active_games:
                     try:
@@ -1106,7 +1022,6 @@ def register_mines_handlers(bot_instance):
 
                 game = active_games[user_id]
 
-            # Проверяем, активна ли еще игра
             if not game.game_active:
                 try:
                     bot.answer_callback_query(call.id, "❌ Игра уже завершена!")
@@ -1127,11 +1042,9 @@ def register_mines_handlers(bot_instance):
                     clear_action_processing(user_id, action_key)
                     return
 
-                # Используем лок игры для защиты от конкурентного доступа
                 with game.action_lock:
-                    # Проверяем время последнего действия в игре
                     current_time = time.time()
-                    if current_time - game.last_action_time < 0.3:  # УВЕЛИЧЕНО ДО 0.3 секунды
+                    if current_time - game.last_action_time < 0.3:
                         try:
                             bot.answer_callback_query(call.id, "⏳ Подождите немного...", show_alert=False)
                         except:
@@ -1148,7 +1061,6 @@ def register_mines_handlers(bot_instance):
                         users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
                         save_users_data(users_data)
 
-                        # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
                         try:
                             add_game_to_history(
                                 user_id=int(user_id),
@@ -1160,7 +1072,6 @@ def register_mines_handlers(bot_instance):
                         except Exception as e:
                             logging.error(f"Ошибка записи проигрыша в историю: {e}")
 
-                        # Удаляем игру из активных
                         with mines_lock:
                             if user_id in active_games:
                                 del active_games[user_id]
@@ -1196,11 +1107,9 @@ def register_mines_handlers(bot_instance):
                         return
 
             elif call.data == "mine_cashout":
-                # Используем лок игры для защиты от конкурентного доступа
                 with game.action_lock:
-                    # Проверяем время последнего действия в игре
                     current_time = time.time()
-                    if current_time - game.last_action_time < 0.3:  # УВЕЛИЧЕНО ДО 0.3 секунды
+                    if current_time - game.last_action_time < 0.3:
                         try:
                             bot.answer_callback_query(call.id, "⏳ Подождите немного...", show_alert=False)
                         except:
@@ -1210,7 +1119,6 @@ def register_mines_handlers(bot_instance):
                     
                     game.last_action_time = current_time
                     
-                    # Проверяем, что игра все еще активна
                     if not game.game_active:
                         try:
                             bot.answer_callback_query(call.id, "❌ Игра уже завершена!")
@@ -1219,7 +1127,6 @@ def register_mines_handlers(bot_instance):
                         clear_action_processing(user_id, action_key)
                         return
                     
-                    # Помечаем игру как завершенную ПЕРЕД начислением
                     game.game_active = False
                     
                     win_amount = game.bet_amount * game.multiplier
@@ -1228,7 +1135,6 @@ def register_mines_handlers(bot_instance):
                     users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + win_amount, 2)
                     save_users_data(users_data)
 
-                    # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
                     try:
                         add_game_to_history(
                             user_id=int(user_id),
@@ -1240,13 +1146,11 @@ def register_mines_handlers(bot_instance):
                     except Exception as e:
                         logging.error(f"Ошибка записи выигрыша в историю: {e}")
 
-                    # ДОБАВЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС (6% от выигрыша) в отдельном потоке
                     threading.Thread(
                         target=lambda: referrals.add_referral_bonus(user_id, win_amount),
                         daemon=True
                     ).start()
 
-                    # Удаляем игру из активных
                     with mines_lock:
                         if user_id in active_games:
                             del active_games[user_id]
@@ -1267,7 +1171,6 @@ def register_mines_handlers(bot_instance):
                     return
 
             elif call.data == "mine_ignore":
-                # Игнорируем нажатия на уже открытые клетки
                 try:
                     bot.answer_callback_query(call.id)
                 except:
@@ -1277,11 +1180,9 @@ def register_mines_handlers(bot_instance):
                 return
 
         except Exception as e:
-            # Общая обработка ошибок
             if "query is too old" in str(e) or "query ID is invalid" in str(e):
                 return
             elif "message is not modified" in str(e):
-                # Это нормальная ситуация - игрок быстро нажимает
                 pass
             else:
                 logging.error(f"Ошибка в mines_callback_handler: {e}")
@@ -1289,27 +1190,21 @@ def register_mines_handlers(bot_instance):
                     bot.answer_callback_query(call.id, "❌ Произошла ошибка!")
                 except:
                     pass
-            # Всегда очищаем обработку
             clear_action_processing(user_id, action_key if 'action_key' in locals() else "")
 
-# Публичная функция для запуска игры из main.py
 def mines_start(message):
     """Функция для запуска игры Мины из внешних модулей"""
     user_id = str(message.from_user.id)
 
-    # Проверяем ограничение по времени
     if not rate_limit_mines(user_id):
         bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
         return
 
-    # Проверяем активную игру пользователя
     with mines_lock:
         if user_id in active_games:
-            # Проверяем, не устарела ли игра
             game = active_games[user_id]
             current_time = time.time()
             if current_time - game.created_time > GAME_TIMEOUT:
-                # Автоматически отменяем старую игру
                 cancel_user_game(user_id)
             else:
                 bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -1339,12 +1234,10 @@ def mines_start(message):
         reply_markup=get_bet_selection_keyboard()
     )
 
-# Экспортируем функцию для принудительной отмены игры
 def cancel_game(user_id):
     """Внешняя функция для отмены игры пользователя"""
     return cancel_user_game(str(user_id))
 
-# Экспортируем функцию для получения списка активных игр
 def get_active_games():
     """Возвращает список активных игр (для админки)"""
     with mines_lock:
