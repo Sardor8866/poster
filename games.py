@@ -2027,3 +2027,75 @@ def register_games_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
             except:
                 pass
+@bot.callback_query_handler(func=lambda call: call.data in ["games_dice", "games_basketball", "games_football", "games_darts"])
+def handle_inline_games_selection(call):
+    """Обработчик выбора игр из inline-меню"""
+    try:
+        user_id = str(call.from_user.id)
+        
+        if not rate_limit(user_id):
+            bot.answer_callback_query(call.id, "❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
+            return
+        
+        with bet_lock:
+            if user_id in active_games:
+                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                return
+        
+        users_data = load_users_data()
+        
+        if user_id not in users_data:
+            users_data[user_id] = {'balance': 0}
+            save_users_data(users_data)
+            bot.answer_callback_query(call.id, "❌ У вас нет баланса. Начните с /start")
+            return
+        
+        balance = users_data[user_id].get('balance', 0)
+        balance_rounded = round(balance, 2)
+        
+        game_types = {
+            "games_dice": ("🎲 Кости", "dice"),
+            "games_basketball": ("🏀 Баскетбол", "basketball"),
+            "games_football": ("⚽ Футбол", "football"),
+            "games_darts": ("🎯 Дартс", "darts")
+        }
+        
+        game_name, game_type = game_types[call.data]
+        
+        with bet_lock:
+            active_bets[user_id] = {'game_type': game_type}
+        
+        # Редактируем сообщение с меню на выбор ставки
+        try:
+            bot.edit_message_text(
+                f"""<b>{game_name}</b>
+
+<blockquote>💵 Баланс: {balance_rounded}₽</blockquote>
+
+Выберите сумму ставки:""",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=get_bet_selection_keyboard()
+            )
+        except Exception as e:
+            if "message is not modified" not in str(e):
+                logging.error(f"Ошибка edit_message_text: {e}")
+                # Если не удалось отредактировать, отправляем новое сообщение
+                bot.send_message(
+                    call.message.chat.id,
+                    f"""<b>{game_name}</b>
+
+<blockquote>💵 Баланс: {balance_rounded}₽</blockquote>
+
+Выберите сумму ставки:""",
+                    parse_mode='HTML',
+                    reply_markup=get_bet_selection_keyboard()
+                )
+    
+    except Exception as e:
+        logging.error(f"Ошибка в handle_inline_games_selection: {e}")
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+        except:
+            pass
