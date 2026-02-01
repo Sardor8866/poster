@@ -27,7 +27,7 @@ def save_withdraw_requests(data):
     with open('withdraw_requests.json', 'w') as f:
         json.dump(data, f)
 
-ADMIN_IDS = [8118184388, 5046075976]
+ADMIN_IDS = [8118184388, 8115654734]
 
 def register_admin_handlers(bot):
     """Регистрирует только админ-обработчики"""
