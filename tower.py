@@ -19,9 +19,9 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TowerGame:
-    def __init__(self, user_id, dragons_count, bet_amount, chat_id=None, message_id=None):
+    def __init__(self, user_id, mines_count, bet_amount, chat_id=None, message_id=None):
         self.user_id = user_id
-        self.dragons_count = dragons_count
+        self.mines_count = mines_count
         self.bet_amount = bet_amount
         self.floor = 0
         self.game_active = True
@@ -34,14 +34,14 @@ class TowerGame:
             5: [3.2, 12.5, 90.0, 1600.0],
             6: [3.9, 20.0, 160.0, 3000.0]
         }
-        self.dragon_floors = {}
+        self.mine_floors = {}
         self.selected_cells = {}
         self.last_action_time = time.time()
         self.action_lock = threading.Lock()
         self.created_time = time.time()
         self.chat_id = chat_id
         self.message_id = message_id
-        self.generate_dragons()
+        self.generate_mines()
 
     def generate_session_token(self, user_id, game_type):
         """Генерирует уникальный токен для сессии игры"""
@@ -49,17 +49,17 @@ class TowerGame:
         data = f"{user_id}_{game_type}_{timestamp}"
         return hashlib.md5(data.encode()).hexdigest()[:8]
 
-    def generate_dragons(self):
+    def generate_mines(self):
         for floor in range(1, 7):
             available_cells = list(range(5))
             random.shuffle(available_cells)
-            self.dragon_floors[floor] = available_cells[:self.dragons_count]
+            self.mine_floors[floor] = available_cells[:self.mines_count]
 
     def climb_floor(self, selected_cell):
         self.floor += 1
         current_floor = self.floor
 
-        if current_floor in self.dragon_floors and selected_cell in self.dragon_floors[current_floor]:
+        if current_floor in self.mine_floors and selected_cell in self.mine_floors[current_floor]:
             self.game_active = False
             return False
         return True
@@ -73,18 +73,18 @@ class TowerGame:
     def get_current_multiplier(self):
         if self.floor == 0:
             return 1.0
-        dragon_index = self.dragons_count - 1
-        if self.floor in self.multipliers and dragon_index < len(self.multipliers[self.floor]):
-            return self.multipliers[self.floor][dragon_index]
+        mine_index = self.mines_count - 1
+        if self.floor in self.multipliers and mine_index < len(self.multipliers[self.floor]):
+            return self.multipliers[self.floor][mine_index]
         return 1.0
 
     def get_next_multiplier(self):
         next_floor = self.floor + 1
         if next_floor > 6:
             next_floor = 6
-        dragon_index = self.dragons_count - 1
-        if next_floor in self.multipliers and dragon_index < len(self.multipliers[next_floor]):
-            return self.multipliers[next_floor][dragon_index]
+        mine_index = self.mines_count - 1
+        if next_floor in self.multipliers and mine_index < len(self.multipliers[next_floor]):
+            return self.multipliers[next_floor][mine_index]
         return 1.0
 
 users_data_lock = threading.Lock()
@@ -248,22 +248,22 @@ def get_bet_selection_keyboard_tower():
     markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="tower_custom_bet"))
     return markup
 
-def get_dragons_selection_keyboard():
+def get_mines_selection_keyboard_tower():
     markup = types.InlineKeyboardMarkup(row_width=4)
-    dragons_counts = ["1", "2", "3", "4"]
-    buttons = [types.InlineKeyboardButton(f"{count}", callback_data=f"tower_dragons_{count}") for count in dragons_counts]
+    mines_counts = ["1", "2", "3", "4"]
+    buttons = [types.InlineKeyboardButton(f"{count}", callback_data=f"tower_mines_{count}") for count in mines_counts]
     markup.row(*buttons)
-    markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="tower_custom_dragons"))
+    markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="tower_custom_mines"))
     return markup
 
-def get_tower_keyboard(game, show_all=False, show_current_dragons=False):
+def get_tower_keyboard(game, show_all=False, show_current_mines=False):
     markup = types.InlineKeyboardMarkup(row_width=6)
 
     for floor_num in range(6, 0, -1):
         row_buttons = []
 
-        dragon_index = game.dragons_count - 1
-        multiplier = game.multipliers[floor_num][dragon_index]
+        mine_index = game.mines_count - 1
+        multiplier = game.multipliers[floor_num][mine_index]
         if multiplier < 10:
             mult_text = f"x{multiplier:.2f}"
         elif multiplier < 100:
@@ -276,17 +276,17 @@ def get_tower_keyboard(game, show_all=False, show_current_dragons=False):
 
         for cell in range(5):
             if show_all:
-                if floor_num in game.dragon_floors and cell in game.dragon_floors[floor_num]:
-                    emoji = "🐉"
+                if floor_num in game.mine_floors and cell in game.mine_floors[floor_num]:
+                    emoji = "💣"
                 elif floor_num in game.selected_cells and cell in game.selected_cells[floor_num]:
                     emoji = "💎"
                 else:
                     emoji = "◾"
                 callback_data = "tower_ignore"
 
-            elif show_current_dragons and floor_num == game.floor:
-                if cell in game.dragon_floors.get(floor_num, []):
-                    emoji = "🐉"
+            elif show_current_mines and floor_num == game.floor:
+                if cell in game.mine_floors.get(floor_num, []):
+                    emoji = "💣"
                 elif cell in game.selected_cells.get(floor_num, []):
                     emoji = "💎"
                 else:
@@ -298,8 +298,8 @@ def get_tower_keyboard(game, show_all=False, show_current_dragons=False):
                     emoji = "☁️"
                     callback_data = f"tower_climb_{floor_num}_{cell}"
                 elif floor_num <= game.floor:
-                    if floor_num in game.dragon_floors and cell in game.dragon_floors[floor_num]:
-                        emoji = "🐉"
+                    if floor_num in game.mine_floors and cell in game.mine_floors[floor_num]:
+                        emoji = "💣"
                     elif floor_num in game.selected_cells and cell in game.selected_cells[floor_num]:
                         emoji = "💎"
                     else:
@@ -313,7 +313,7 @@ def get_tower_keyboard(game, show_all=False, show_current_dragons=False):
 
         markup.row(*row_buttons)
 
-    if (not show_all and game.floor > 0 and game.game_active) or show_current_dragons:
+    if (not show_all and game.floor > 0 and game.game_active) or show_current_mines:
         current_mult = game.get_current_multiplier()
         markup.row(types.InlineKeyboardButton(
             f"💰 ЗАБРАТЬ {round(game.bet_amount * current_mult, 2)}₽",
@@ -346,7 +346,7 @@ def format_tower_info(game):
 <blockquote>
 <b>🎯 Конфигурация:</b>
 ├ 💸Ставка: <b>{game.bet_amount}₽</b>
-├ 🐉Драконы на этаж: <b>{game.dragons_count}</b>
+├ 💣Мин на этаж: <b>{game.mines_count}</b>
 └ 📌Этаж: <b>{game.floor}/6</b>
 
 <b>📊 Множители:</b>
@@ -378,7 +378,7 @@ def format_tower_result(game, win_amount, is_win=False):
 
 <b>📊 Статистика:</b>
 ├ 💹Достигнут этаж: <b>{game.floor}/6</b>
-└ 🐉Драконы на этаж: <b>{game.dragons_count}</b>
+└ 💣Мин на этаж: <b>{game.mines_count}</b>
 </blockquote>
 
 <i>Вы успешно прошли башню! Поздравляем! 🏰</i>
@@ -386,7 +386,7 @@ def format_tower_result(game, win_amount, is_win=False):
     else:
         return f"""
 <blockquote expandable>╔══════════════════════╗
-   🐉 <b>ПОРАЖЕНИЕ</b> 🐉
+   💣 <b>ПОРАЖЕНИЕ</b> 💣
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
@@ -396,11 +396,11 @@ def format_tower_result(game, win_amount, is_win=False):
 └ 📌Множитель: <b>x{game.get_current_multiplier():.2f}</b>
 
 <b>📊 Статистика:</b>
-├ ❌Разбужен дракон на: <b>{game.floor}/6</b>
-└ 🐉Драконы на этаж: <b>{game.dragons_count}</b>
+├ ❌Попали на мину на этаже: <b>{game.floor}/6</b>
+└ 💣Мин на этаж: <b>{game.mines_count}</b>
 </blockquote>
 
-<i>Дракон проснулся! Попробуйте еще раз! 💪</i>
+<i>Попали на мину! Попробуйте еще раз! 💪</i>
 """
 
 bot = None
@@ -471,7 +471,7 @@ def cancel_tower_user_game(user_id, notify_user=True):
         logging.error(f"Ошибка при отмене игры Башня пользователя {user_id}: {e}")
         return False
 
-def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=None, chat_id=None, message_id=None):
+def start_tower_game_from_command(user_id, mines_count, bet_amount, message=None, chat_id=None, message_id=None):
     """Функция для запуска игры через команду"""
     try:
         if not rate_limit_tower(user_id):
@@ -490,9 +490,9 @@ def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=No
                         bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
                     return False
 
-        if dragons_count < 1 or dragons_count > 4:
+        if mines_count < 1 or mines_count > 4:
             if message:
-                bot.send_message(message.chat.id, "❌ Количество драконов должно быть от 1 до 4!")
+                bot.send_message(message.chat.id, "❌ Количество мин должно быть от 1 до 4!")
             return False
 
         if bet_amount < MIN_BET:
@@ -513,11 +513,11 @@ def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=No
             return False
 
         if message:
-            game = TowerGame(user_id, dragons_count, bet_amount, chat_id=message.chat.id)
+            game = TowerGame(user_id, mines_count, bet_amount, chat_id=message.chat.id)
         elif chat_id:
-            game = TowerGame(user_id, dragons_count, bet_amount, chat_id=chat_id, message_id=message_id)
+            game = TowerGame(user_id, mines_count, bet_amount, chat_id=chat_id, message_id=message_id)
         else:
-            game = TowerGame(user_id, dragons_count, bet_amount)
+            game = TowerGame(user_id, mines_count, bet_amount)
 
         with tower_lock:
             active_tower_games[user_id] = game
@@ -570,7 +570,7 @@ def start_tower_game_from_command(user_id, dragons_count, bet_amount, message=No
         return False
 
 def parse_tower_command(text):
-    """Парсит команду /башня или /tower и возвращает (количество_драконов, сумма_ставки)"""
+    """Парсит команду /башня или /tower и возвращает (количество_мин, сумма_ставки)"""
     try:
         parts = text.strip().split()
         
@@ -583,19 +583,19 @@ def parse_tower_command(text):
         if command_lower not in valid_commands:
             return None, None
         
-        dragons_count = None
+        mines_count = None
         bet_amount = None
         
         for i in range(1, len(parts)):
-            if not dragons_count:
+            if not mines_count:
                 try:
-                    dragons_count = int(parts[i])
-                    if not (1 <= dragons_count <= 4):
-                        dragons_count = None
+                    mines_count = int(parts[i])
+                    if not (1 <= mines_count <= 4):
+                        mines_count = None
                 except:
                     pass
             
-            if dragons_count and i + 1 < len(parts):
+            if mines_count and i + 1 < len(parts):
                 try:
                     bet_amount = float(parts[i + 1])
                     if bet_amount < MIN_BET:
@@ -604,7 +604,7 @@ def parse_tower_command(text):
                 except:
                     pass
         
-        return dragons_count, bet_amount
+        return mines_count, bet_amount
     except Exception as e:
         logging.error(f"Ошибка при парсинге команды: {e}")
         return None, None
@@ -623,27 +623,27 @@ def register_tower_handlers(bot_instance):
     def tower_command_handler(message):
         user_id = str(message.from_user.id)
         
-        dragons_count, bet_amount = parse_tower_command(message.text)
+        mines_count, bet_amount = parse_tower_command(message.text)
         
-        if dragons_count is None or bet_amount is None:
+        if mines_count is None or bet_amount is None:
             help_text = """<blockquote expandable>╔══════════════════════╗
    🏰 <b>ИГРА БАШНЯ</b> 🏰
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
 <b>📖 Как играть:</b>
-• Напишите <code>/башня 2 100</code> чтобы начать игру с 2 драконами и ставкой 100₽
+• Напишите <code>/башня 2 100</code> чтобы начать игру с 2 минами и ставкой 100₽
 • Или используйте меню для настройки игры
 
 <b>🎯 Правила:</b>
 • Поднимайтесь по этажам башни (6 этажей)
 • На каждом этаже выбирайте безопасную ячейку
-• Избегайте драконов - если выберете ячейку с драконом, проиграете
+• Избегайте мин - если выберете ячейку с миной, проиграете
 • Каждый успешный этаж увеличивает множитель
 • Заберите выигрыш в любой момент
 
 <b>⚙️ Параметры:</b>
-• Драконы на этаж: от 1 до 4
+• Мин на этаж: от 1 до 4
 • Этажей: 6
 • Минимальная ставка: 25₽
 • Игра автоматически закрывается через 5 минут бездействия (ставка возвращается)
@@ -651,7 +651,7 @@ def register_tower_handlers(bot_instance):
             bot.send_message(message.chat.id, help_text, parse_mode='HTML')
             return
         
-        start_tower_game_from_command(user_id, dragons_count, bet_amount, message=message)
+        start_tower_game_from_command(user_id, mines_count, bet_amount, message=message)
 
     def process_custom_bet(message):
         try:
@@ -701,10 +701,10 @@ def register_tower_handlers(bot_instance):
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
-Выберите количество драконов (1-4):
+Выберите количество мин (1-4):
 </blockquote>""",
                 parse_mode='HTML',
-                reply_markup=get_dragons_selection_keyboard()
+                reply_markup=get_mines_selection_keyboard_tower()
             )
         except ValueError:
             bot.send_message(message.chat.id, "❌ Введите корректную сумму!")
@@ -712,16 +712,12 @@ def register_tower_handlers(bot_instance):
             logging.error(f"Ошибка в process_custom_bet: {e}")
             bot.send_message(message.chat.id, "❌ Произошла ошибка!")
 
-    def process_custom_dragons(message):
+    def process_custom_mines_tower(message):
         try:
             user_id = str(message.from_user.id)
 
-            if not rate_limit_tower(user_id):
-                bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
-                return
-
-            dragons_count = int(message.text)
-            if not 1 <= dragons_count <= 4:
+            mines_count = int(message.text)
+            if not 1 <= mines_count <= 4:
                 bot.send_message(message.chat.id, "❌ Введите число от 1 до 4!")
                 return
 
@@ -750,7 +746,7 @@ def register_tower_handlers(bot_instance):
 
             success = start_tower_game_from_command(
                 user_id=user_id,
-                dragons_count=dragons_count,
+                mines_count=mines_count,
                 bet_amount=bet_amount,
                 message=message
             )
@@ -763,7 +759,7 @@ def register_tower_handlers(bot_instance):
         except ValueError:
             bot.send_message(message.chat.id, "❌ Введите корректное число!")
         except Exception as e:
-            logging.error(f"Ошибка в process_custom_dragons: {e}")
+            logging.error(f"Ошибка в process_custom_mines_tower: {e}")
             bot.send_message(message.chat.id, "❌ Произошла ошибка!")
 
     @bot.message_handler(func=lambda message: message.text in ["🏰 Башня", "башня", "Tower", "tower", "Лесенка", "лесенка", "Лестница", "лестница", "Ленсенька", "лесенька"])
@@ -824,7 +820,7 @@ def register_tower_handlers(bot_instance):
             elif call.data.startswith("tower_bet_"):
                 bet = call.data.split("_")[2]
                 action_key = f"bet_{bet}"
-            elif call.data.startswith("tower_dragons_"):
+            elif call.data.startswith("tower_mines_"):
                 count = call.data.split("_")[2]
                 action_key = f"dragons_{count}"
             else:
@@ -877,12 +873,12 @@ def register_tower_handlers(bot_instance):
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
-Выберите количество драконов (1-4):
+Выберите количество мин (1-4):
 </blockquote>""",
                         call.message.chat.id,
                         call.message.message_id,
                         parse_mode='HTML',
-                        reply_markup=get_dragons_selection_keyboard()
+                        reply_markup=get_mines_selection_keyboard_tower()
                     )
                 except Exception as e:
                     if "message is not modified" not in str(e):
@@ -891,8 +887,8 @@ def register_tower_handlers(bot_instance):
                     clear_action_processing_tower(user_id, action_key)
                 return
 
-            elif call.data.startswith("tower_dragons_"):
-                dragons_count = int(call.data.split("_")[2])
+            elif call.data.startswith("tower_mines_"):
+                mines_count = int(call.data.split("_")[2])
 
                 with tower_lock:
                     if user_id in active_tower_games:
@@ -929,7 +925,7 @@ def register_tower_handlers(bot_instance):
 
                 success = start_tower_game_from_command(
                     user_id=user_id,
-                    dragons_count=dragons_count,
+                    mines_count=mines_count,
                     bet_amount=bet_amount,
                     chat_id=call.message.chat.id,
                     message_id=call.message.message_id
@@ -983,7 +979,7 @@ def register_tower_handlers(bot_instance):
                     clear_action_processing_tower(user_id, action_key)
                 return
 
-            elif call.data == "tower_custom_dragons":
+            elif call.data == "tower_custom_mines":
                 with tower_lock:
                     if user_id in active_tower_games:
                         game = active_tower_games[user_id]
@@ -1006,17 +1002,17 @@ def register_tower_handlers(bot_instance):
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
-Введите количество драконов (1-4):
+Введите количество мин (1-4):
 </blockquote>""",
                         parse_mode='HTML'
                     )
                 except Exception as e:
-                    logging.error(f"Ошибка отправки сообщения tower_custom_dragons: {e}")
+                    logging.error(f"Ошибка отправки сообщения tower_custom_mines: {e}")
                     clear_action_processing_tower(user_id, action_key)
                     return
                 
                 try:
-                    bot.register_next_step_handler(call.message, process_custom_dragons)
+                    bot.register_next_step_handler(call.message, process_custom_mines_tower)
                 except Exception as e:
                     logging.error(f"Ошибка register_next_step_handler: {e}")
                 finally:
@@ -1103,7 +1099,7 @@ def register_tower_handlers(bot_instance):
                                 call.message.chat.id,
                                 call.message.message_id,
                                 parse_mode='HTML',
-                                reply_markup=get_tower_keyboard(game, show_current_dragons=True)
+                                reply_markup=get_tower_keyboard(game, show_current_mines=True)
                             )
                         except Exception as e:
                             if "message is not modified" not in str(e):
@@ -1258,7 +1254,7 @@ def get_active_tower_games():
     with tower_lock:
         return {user_id: {
             'bet_amount': game.bet_amount,
-            'dragons_count': game.dragons_count,
+            'mines_count': game.mines_count,
             'floor': game.floor,
             'created_time': game.created_time,
             'last_action_time': game.last_action_time,
