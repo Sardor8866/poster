@@ -288,20 +288,20 @@ def get_game_keyboard(game, game_over=False):
             if game_over:
                 if (i, j) in game.mines_positions:
                     if game.revealed[i][j]:
-                        emoji = "💢"
+                        emoji = "❌"
                     else:
-                        emoji = "💢"
+                        emoji = "💣"
                 elif game.revealed[i][j]:
-                    emoji = "💎"
+                    emoji = "🟩"
                 else:
                     emoji = "◾️"
                 callback_data = "mine_ignore"
             else:
                 if game.revealed[i][j]:
                     if (i, j) in game.mines_positions:
-                        emoji = "💢"
+                        emoji = "❌"
                     else:
-                        emoji = "💎"
+                        emoji = "🟩"
                     callback_data = "mine_ignore"
                 else:
                     emoji = "◽️"
@@ -655,10 +655,6 @@ def register_mines_handlers(bot_instance):
         try:
             user_id = str(message.from_user.id)
 
-            if not rate_limit_mines(user_id):
-                bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
-                return
-
             bet_amount = float(message.text)
 
             if bet_amount < MIN_BET:
@@ -703,10 +699,6 @@ def register_mines_handlers(bot_instance):
     def process_custom_mines(message):
         try:
             user_id = str(message.from_user.id)
-
-            if not rate_limit_mines(user_id):
-                bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
-                return
 
             mines_count = int(message.text)
             if not 2 <= mines_count <= 24:
@@ -1251,4 +1243,3 @@ def get_active_games():
             'chat_id': game.chat_id,
             'message_id': game.message_id
         } for user_id, game in active_games.items()}
-
