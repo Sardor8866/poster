@@ -288,20 +288,20 @@ def get_game_keyboard(game, game_over=False):
             if game_over:
                 if (i, j) in game.mines_positions:
                     if game.revealed[i][j]:
-                        emoji = "❌"
+                        emoji = "💢"
                     else:
-                        emoji = "💣"
+                        emoji = "💢"
                 elif game.revealed[i][j]:
-                    emoji = "🟩"
+                    emoji = "💎"
                 else:
                     emoji = "◾️"
                 callback_data = "mine_ignore"
             else:
                 if game.revealed[i][j]:
                     if (i, j) in game.mines_positions:
-                        emoji = "❌"
+                        emoji = "💢"
                     else:
-                        emoji = "🟩"
+                        emoji = "💎"
                     callback_data = "mine_ignore"
                 else:
                     emoji = "◽️"
@@ -1243,3 +1243,4 @@ def get_active_games():
             'chat_id': game.chat_id,
             'message_id': game.message_id
         } for user_id, game in active_games.items()}
+
