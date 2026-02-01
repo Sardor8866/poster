@@ -10,36 +10,29 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Импорт функций из модуля лидеров
 try:
     from leaders import update_game_history
 except ImportError:
-    # Функция-заглушка, если модуль лидеров не найден
     def update_game_history(user_id, game_data):
         logging.warning(f"Модуль лидеров не найден, транзакция не записана в историю: {user_id}")
         return False
 
-# Конфигурация
 CRYPTOBOT_TOKEN = "477733:AAzooy5vcnCpJuGgTZc1Rdfbu71bqmrRMgr"
 ADMIN_ID = "8118184388"
 
-# Минимальные и максимальные суммы
-MIN_DEPOSIT_RUB = 50  # Минимальное пополнение 50 RUB
-MIN_WITHDRAW_RUB = 300  # Минимальный вывод 300 RUB
-MAX_DEPOSIT_RUB = 500000  # Максимальное пополнение 500,000 RUB
-MAX_WITHDRAW_RUB = 500000  # Максимальный вывод 500,000 RUB
+MIN_DEPOSIT_RUB = 50
+MIN_WITHDRAW_RUB = 300
+MAX_DEPOSIT_RUB = 500000
+MAX_WITHDRAW_RUB = 500000
 
-# Настройки режимов - глобальная переменная
-TREASURY_MODE = "real"  # "real" или "test" - режим казны
+TREASURY_MODE = "real"
 PENDING_WITHDRAWALS_FILE = 'pending_withdrawals.json'
 
-# Хранилища
 user_last_action = {}
 pending_invoices = {}
 user_states = {}
 admin_states = {}
 
-# Курсы валют (будем получать автоматически)
 exchange_rates = {
     "USD_RUB": None,
     "last_updated": None
@@ -137,7 +130,6 @@ def remove_pending_withdrawal(withdrawal_id):
     try:
         withdrawals = load_pending_withdrawals()
 
-        # Ищем и удаляем вывод
         for i, withdrawal in enumerate(withdrawals):
             if withdrawal['id'] == withdrawal_id:
                 del withdrawals[i]
@@ -193,8 +185,8 @@ def add_transaction(user_id, amount, transaction_type, status="completed", crypt
         transaction = {
             'user_id': int(user_id),
             'amount': float(amount),
-            'type': transaction_type,  # 'deposit' или 'withdraw'
-            'status': status,  # 'completed', 'pending', 'failed'
+            'type': transaction_type,
+            'status': status,
             'crypto_type': crypto_type,
             'timestamp': int(time.time()),
             'withdrawal_id': withdrawal_id
@@ -202,14 +194,12 @@ def add_transaction(user_id, amount, transaction_type, status="completed", crypt
 
         transactions.append(transaction)
 
-        # Ограничиваем размер истории (последние 1000 транзакций)
         if len(transactions) > 1000:
             transactions = transactions[-1000:]
 
         if save_transactions(transactions):
             logging.info(f"✅ Транзакция добавлена: {user_id}, {transaction_type}, {amount} ₽")
 
-            # Также добавляем в историю игр для лидеров
             try:
                 if transaction_type == 'deposit':
                     update_game_history(user_id, {
@@ -242,7 +232,6 @@ def add_transaction(user_id, amount, transaction_type, status="completed", crypt
 def get_exchange_rate():
     """Получает актуальный курс USD/RUB"""
     try:
-        # Используем API ЦБ РФ или другой источник
         response = requests.get("https://www.cbr-xml-daily.ru/daily_json.js", timeout=10)
         if response.status_code == 200:
             data = response.json()
@@ -252,7 +241,6 @@ def get_exchange_rate():
             logging.info(f"Курс обновлен: 1 USD = {usd_rate} RUB")
             return usd_rate
 
-        # Альтернативный источник
         response = requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=10)
         if response.status_code == 200:
             data = response.json()
@@ -262,7 +250,6 @@ def get_exchange_rate():
             logging.info(f"Курс обновлен: 1 USD = {usd_rate} RUB")
             return usd_rate
 
-        # Если API не работают, используем фиксированный курс
         logging.warning("API курсов недоступны, использую фиксированный курс 90")
         return 90.0
 
@@ -304,13 +291,11 @@ def get_treasury_balance():
         if result and result.get('ok'):
             balances = result['result']
 
-            # Ищем USDT баланс
             for balance in balances:
                 currency_code = balance.get('currency_code', '')
                 available = float(balance.get('available', 0))
 
                 if currency_code.upper() == 'USDT':
-                    # Конвертируем в рубли
                     rub_amount = convert_usd_to_rub(available)
                     logging.info(f"USDT баланс: ${available} ≈ {rub_amount} RUB")
                     return available, rub_amount
@@ -334,7 +319,6 @@ def get_test_treasury_balance():
             data = json.load(f)
             return data.get('balance_usd', 0), data.get('balance_rub', 0)
     except FileNotFoundError:
-        # Создаем файл с начальным балансом
         initial_balance = {'balance_usd': 1000.0, 'balance_rub': 90000.0}
         with open('test_treasury.json', 'w', encoding='utf-8') as f:
             json.dump(initial_balance, f, ensure_ascii=False, indent=2)
@@ -448,11 +432,9 @@ def get_invoice_status(invoice_id):
 def create_cryptobot_invoice(amount_rub, crypto_type="USDT"):
     """Создает инвойс для пополнения в указанной криптовалюте"""
     try:
-        # Конвертируем рубли в доллары
         amount_usd = convert_rub_to_usd(amount_rub)
 
-        # Проверяем минимальную сумму в крипте
-        min_crypto_amount = 0.01  # Минимум в CryptoBot
+        min_crypto_amount = 0.01
         if amount_usd < min_crypto_amount:
             amount_usd = min_crypto_amount
 
@@ -487,11 +469,9 @@ def create_cryptobot_invoice(amount_rub, crypto_type="USDT"):
 def create_cryptobot_check(amount_rub, user_id, crypto_type="USDT"):
     """Создает чек для вывода в указанной криптовалюте"""
     try:
-        # Конвертируем рубли в доллары
         amount_usd = convert_rub_to_usd(amount_rub)
 
-        # Проверяем минимальную сумму в крипте
-        min_crypto_amount = 0.01  # Минимум в CryptoBot
+        min_crypto_amount = 0.01
         if amount_usd < min_crypto_amount:
             amount_usd = min_crypto_amount
 
@@ -551,24 +531,18 @@ def get_crypto_choice_keyboard():
 def register_crypto_handlers(bot):
     """Регистрация обработчиков"""
 
-    # Тестируем подключение при запуске
     logging.info("Тестируем подключение к CryptoBot API...")
     if test_cryptobot_connection():
         logging.info("✅ Подключение к CryptoBot API успешно")
     else:
         logging.error("❌ Ошибка подключения к CryptoBot API")
 
-    # Проверяем баланс при запуске
     initial_balance_usd, initial_balance_rub = get_treasury_balance()
     logging.info(f"Начальный баланс казны: ${initial_balance_usd} ≈ {initial_balance_rub} ₽")
 
-    # Получаем курс при запуске
     current_rate = get_exchange_rate()
     logging.info(f"Текущий курс: 1 USD = {current_rate} RUB")
 
-    # ============================================
-    # ОСНОВНЫЕ КОМАНДЫ АДМИНИСТРАТОРА
-    # ============================================
 
     """
     📋 ДОСТУПНЫЕ КОМАНДЫ АДМИНА:
@@ -596,7 +570,6 @@ def register_crypto_handlers(bot):
     - /kazna update - Обновить курс вручную
     """
 
-    # Команда /admin - главное меню
     @bot.message_handler(commands=['admin'])
     def admin_command(message):
         try:
@@ -642,7 +615,6 @@ def register_crypto_handlers(bot):
 <code>/kazna update</code> - Обновить курс
 """
 
-            # Убираем клавиатуру
             remove_keyboard = types.ReplyKeyboardRemove()
 
             bot.send_message(
@@ -656,9 +628,6 @@ def register_crypto_handlers(bot):
             logging.error(f"Ошибка в admin_command: {e}")
             bot.send_message(message.chat.id, "❌ Ошибка")
 
-    # ============================================
-    # КОМАНДЫ УПРАВЛЕНИЯ ВЫВОДАМИ (/check)
-    # ============================================
 
     @bot.message_handler(commands=['check'])
     def check_command(message):
@@ -669,11 +638,9 @@ def register_crypto_handlers(bot):
                 bot.send_message(message.chat.id, "❌ Команда доступна только администратору")
                 return
 
-            # Получаем аргументы команды
             args = message.text.split()
 
             if len(args) == 1:
-                # Просто /check - показываем справку
                 pending_count = len([w for w in load_pending_withdrawals() if w['status'] == 'pending'])
                 completed_count = len([w for w in load_pending_withdrawals() if w['status'] == 'completed'])
                 rejected_count = len([w for w in load_pending_withdrawals() if w['status'] == 'rejected'])
@@ -705,9 +672,9 @@ def register_crypto_handlers(bot):
 <code>/check info [ID]</code> - Информация о выводе
 
 📝 <b>Примеры:</b>
-<code>/check approve 5</code> - одобрить вывод #5
-<code>/check reject 3</code> - отклонить вывод #3
-<code>/check info 1</code> - информация о выводе #1
+<code>/check approve 5</code> - одобрить вывод
+<code>/check reject 3</code> - отклонить вывод
+<code>/check info 1</code> - информация о выводе
 """
 
                 bot.send_message(
@@ -720,7 +687,6 @@ def register_crypto_handlers(bot):
                 command = args[1].lower()
 
                 if command == "pending":
-                    # Показать ожидающие выводы
                     withdrawals = load_pending_withdrawals()
                     pending_withdrawals = [w for w in withdrawals if w['status'] == 'pending']
 
@@ -739,14 +705,12 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, display, parse_mode='HTML')
 
                 elif command == "list":
-                    # Список всех выводов
                     withdrawals = load_pending_withdrawals()
 
                     if not withdrawals:
                         bot.send_message(message.chat.id, "📭 <b>История выводов пуста</b>", parse_mode='HTML')
                         return
 
-                    # Показываем последние 20 выводов
                     recent_withdrawals = sorted(withdrawals, key=lambda x: x['created_at'], reverse=True)[:20]
 
                     display = f"<b>📋 ПОСЛЕДНИЕ ВЫВОДЫ ({len(recent_withdrawals)} из {len(withdrawals)}):</b>\n\n"
@@ -759,7 +723,6 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, display, parse_mode='HTML')
 
                 elif command == "completed":
-                    # Завершенные выводы
                     withdrawals = load_pending_withdrawals()
                     completed_withdrawals = [w for w in withdrawals if w['status'] == 'completed']
 
@@ -767,7 +730,6 @@ def register_crypto_handlers(bot):
                         bot.send_message(message.chat.id, "📭 <b>Нет завершенных выводов</b>", parse_mode='HTML')
                         return
 
-                    # Показываем последние 20 завершенных выводов
                     recent_withdrawals = sorted(completed_withdrawals, key=lambda x: x['processed_at'] if x['processed_at'] else x['created_at'], reverse=True)[:20]
 
                     display = f"<b>✅ ЗАВЕРШЕННЫЕ ВЫВОДЫ ({len(recent_withdrawals)} из {len(completed_withdrawals)}):</b>\n\n"
@@ -780,7 +742,6 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, display, parse_mode='HTML')
 
                 elif command == "rejected":
-                    # Отклоненные выводы
                     withdrawals = load_pending_withdrawals()
                     rejected_withdrawals = [w for w in withdrawals if w['status'] == 'rejected']
 
@@ -788,7 +749,6 @@ def register_crypto_handlers(bot):
                         bot.send_message(message.chat.id, "📭 <b>Нет отклоненных выводов</b>", parse_mode='HTML')
                         return
 
-                    # Показываем последние 20 отклоненных выводов
                     recent_withdrawals = sorted(rejected_withdrawals, key=lambda x: x['processed_at'] if x['processed_at'] else x['created_at'], reverse=True)[:20]
 
                     display = f"<b>❌ ОТКЛОНЕННЫЕ ВЫВОДЫ ({len(recent_withdrawals)} из {len(rejected_withdrawals)}):</b>\n\n"
@@ -801,7 +761,6 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, display, parse_mode='HTML')
 
                 elif command == "approve":
-                    # Одобрить вывод
                     if len(args) < 3:
                         bot.send_message(message.chat.id, "❌ Укажите ID вывода\nПример: <code>/check approve 5</code>", parse_mode='HTML')
                         return
@@ -819,17 +778,14 @@ def register_crypto_handlers(bot):
                             return
 
                         if TREASURY_MODE == "real":
-                            # В реальном режиме создаем чек
                             check = create_cryptobot_check(withdrawal['amount_rub'], withdrawal['user_id'], withdrawal['crypto_type'])
 
                             if not check:
                                 bot.send_message(message.chat.id, "❌ Ошибка создания чека")
                                 return
 
-                            # Обновляем статус
                             update_pending_withdrawal_status(withdrawal_id, 'completed', user_id)
 
-                            # Отправляем чек пользователю
                             try:
                                 user_display = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -860,10 +816,8 @@ def register_crypto_handlers(bot):
                             bot.send_message(message.chat.id, f"✅ Вывод #{withdrawal_id} одобрен, чек создан")
 
                         else:
-                            # В тестовом режиме просто обновляем статус
                             update_pending_withdrawal_status(withdrawal_id, 'completed', user_id)
 
-                            # Отправляем сообщение пользователю
                             try:
                                 user_display = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -889,14 +843,12 @@ def register_crypto_handlers(bot):
 
                             bot.send_message(message.chat.id, f"✅ Вывод #{withdrawal_id} одобрен")
 
-                        # Добавляем транзакцию в историю как completed
                         add_transaction(withdrawal['user_id'], withdrawal['amount_rub'], 'withdraw', 'completed', withdrawal['crypto_type'], withdrawal_id)
 
                     except ValueError:
                         bot.send_message(message.chat.id, "❌ Неверный ID вывода")
 
                 elif command == "reject":
-                    # Отклонить вывод
                     if len(args) < 3:
                         bot.send_message(message.chat.id, "❌ Укажите ID вывода\nПример: <code>/check reject 5</code>", parse_mode='HTML')
                         return
@@ -913,10 +865,8 @@ def register_crypto_handlers(bot):
                             bot.send_message(message.chat.id, f"❌ Вывод #{withdrawal_id} уже обработан")
                             return
 
-                        # Обновляем статус
                         update_pending_withdrawal_status(withdrawal_id, 'rejected', user_id)
 
-                        # Возвращаем средства пользователю
                         users_data = load_users_data()
                         user_id_str = str(withdrawal['user_id'])
 
@@ -926,7 +876,6 @@ def register_crypto_handlers(bot):
                             )
                             save_users_data(users_data)
 
-                        # Отправляем сообщение пользователю
                         try:
                             user_display = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -955,7 +904,6 @@ def register_crypto_handlers(bot):
                         bot.send_message(message.chat.id, "❌ Неверный ID вывода")
 
                 elif command == "info":
-                    # Информация о выводе
                     if len(args) < 3:
                         bot.send_message(message.chat.id, "❌ Укажите ID вывода\nПример: <code>/check info 5</code>", parse_mode='HTML')
                         return
@@ -979,7 +927,7 @@ def register_crypto_handlers(bot):
 
                         display = f"""
 <blockquote expandable>╔══════════════════════╗
-   📋 <b>ИНФОРМАЦИЯ О ВЫВОДЕ #{withdrawal_id}</b> 📋
+   📋 <b>ИНФОРМАЦИЯ О ВЫВОДЕ
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
@@ -1008,9 +956,6 @@ def register_crypto_handlers(bot):
             logging.error(f"Ошибка в check_command: {e}")
             bot.send_message(message.chat.id, "❌ Ошибка")
 
-    # ============================================
-    # КОМАНДЫ УПРАВЛЕНИЯ КАЗНОЙ (/kazna)
-    # ============================================
 
     @bot.message_handler(commands=['kazna'])
     def kazna_command(message):
@@ -1021,11 +966,9 @@ def register_crypto_handlers(bot):
                 bot.send_message(message.chat.id, "❌ Команда доступна только администратору")
                 return
 
-            # Получаем аргументы команды
             args = message.text.split()
 
             if len(args) == 1:
-                # Просто /kazna - показываем справку
                 current_rate = get_exchange_rate()
 
                 if TREASURY_MODE == "real":
@@ -1075,7 +1018,6 @@ def register_crypto_handlers(bot):
                 command = args[1].lower()
 
                 if command == "balance":
-                    # Показать баланс казны
                     current_rate = get_exchange_rate()
 
                     if TREASURY_MODE == "real":
@@ -1107,7 +1049,6 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, display, parse_mode='HTML')
 
                 elif command == "mode":
-                    # Показать режим казны
                     display = f"""
 <blockquote expandable>╔══════════════════════╗
    🔄 <b>РЕЖИМ КАЗНЫ</b> 🔄
@@ -1135,25 +1076,18 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, display, parse_mode='HTML')
 
                 elif command == "real":
-                    # Переключить на реальный режим
-                    # Используем глобальную переменную без объявления
-                    # Так как она используется только для чтения в других местах
-                    # Создаем функцию для изменения режима
                     def change_treasury_mode(new_mode):
                         global TREASURY_MODE
                         TREASURY_MODE = new_mode
 
                     change_treasury_mode("real")
 
-                    # Проверяем подключение
                     if test_cryptobot_connection():
                         bot.send_message(message.chat.id, "✅ <b>Режим изменен на Реальный</b>\n\n💎 <i>Используется реальный CryptoBot API</i>", parse_mode='HTML')
                     else:
                         bot.send_message(message.chat.id, "⚠️ <b>Режим изменен на Реальный, но есть проблемы с подключением к CryptoBot</b>", parse_mode='HTML')
 
                 elif command == "test":
-                    # Переключить на тестовый режим
-                    # Используем глобальную переменную без объявления
                     def change_treasury_mode(new_mode):
                         global TREASURY_MODE
                         TREASURY_MODE = new_mode
@@ -1162,7 +1096,6 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, "✅ <b>Режим изменен на Тестовый</b>\n\n🧪 <i>Используется виртуальная казна</i>", parse_mode='HTML')
 
                 elif command == "adjust":
-                    # Изменить баланс казны
                     if TREASURY_MODE == "real":
                         bot.send_message(message.chat.id, "❌ В реальном режиме нельзя изменять баланс через команды")
                         return
@@ -1177,11 +1110,9 @@ def register_crypto_handlers(bot):
                         old_usd, old_rub = get_test_treasury_balance()
 
                         if amount_rub > 0:
-                            # Добавление средств
                             adjust_test_treasury_balance(amount_rub, 'add')
                             operation = "добавлено"
                         elif amount_rub < 0:
-                            # Списание средств
                             adjust_test_treasury_balance(abs(amount_rub), 'subtract')
                             operation = "списано"
                         else:
@@ -1211,7 +1142,6 @@ def register_crypto_handlers(bot):
                         bot.send_message(message.chat.id, "❌ Введите число!")
 
                 elif command == "rate":
-                    # Показать курс валют
                     current_rate = get_exchange_rate()
                     last_updated = exchange_rates.get("last_updated")
 
@@ -1240,7 +1170,6 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, display, parse_mode='HTML')
 
                 elif command == "update":
-                    # Обновить курс вручную
                     old_rate = exchange_rates.get("USD_RUB")
                     new_rate = get_exchange_rate()
 
@@ -1269,9 +1198,6 @@ def register_crypto_handlers(bot):
             logging.error(f"Ошибка в kazna_command: {e}")
             bot.send_message(message.chat.id, "❌ Ошибка")
 
-    # ============================================
-    # ОБРАБОТЧИК ПОЛЬЗОВАТЕЛЬСКИХ КОЛБЭКОВ
-    # ============================================
 
     @bot.callback_query_handler(func=lambda call: True)
     def user_callback_handler(call):
@@ -1279,20 +1205,16 @@ def register_crypto_handlers(bot):
         try:
             user_id = str(call.from_user.id)
 
-            # Если это админ, игнорируем колбэки для админ-панели
             if user_id == ADMIN_ID:
-                # Проверяем, это админская кнопка или пользовательская
                 if call.data.startswith('admin_') or call.data.startswith('withdrawal_'):
                     bot.answer_callback_query(call.id, "⚠️ Используйте команды: /check и /kazna")
                     return
 
-            # Проверяем задержку для кнопок
             allowed, message = check_cooldown(user_id, "button")
             if not allowed:
                 bot.answer_callback_query(call.id, message)
                 return
 
-            # Обработка профиля
             if call.data == "profile_deposit":
                 current_rate = get_exchange_rate()
 
@@ -1356,12 +1278,10 @@ def register_crypto_handlers(bot):
                     reply_markup=get_withdraw_keyboard()
                 )
 
-            # Обработка выбора криптовалюты
             elif call.data in ["crypto_type_usdt", "crypto_type_ton"]:
                 crypto_type = "USDT" if call.data == "crypto_type_usdt" else "TON"
                 current_rate = get_exchange_rate()
 
-                # Сохраняем выбор пользователя
                 if user_id not in user_states:
                     user_states[user_id] = {}
                 user_states[user_id]['selected_crypto'] = crypto_type
@@ -1393,7 +1313,6 @@ def register_crypto_handlers(bot):
                     reply_markup=markup
                 )
 
-            # Обработка крипто операций
             elif call.data == "crypto_back_profile":
                 users_data = load_users_data()
                 user_info = users_data.get(user_id, {})
@@ -1485,38 +1404,30 @@ def register_crypto_handlers(bot):
                 process_withdraw(call, amount_rub, bot)
 
             else:
-                # Если колбэк не обработан
                 bot.answer_callback_query(call.id, "⚠️ Неизвестная команда")
 
         except Exception as e:
             logging.exception(f"Ошибка в user_callback_handler: {e}")
             bot.answer_callback_query(call.id, "❌ Ошибка")
 
-    # ============================================
-    # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-    # ============================================
 
     def process_deposit(call, amount_rub, bot):
         """Обрабатывает пополнение в рублях"""
         try:
             user_id = str(call.from_user.id)
 
-            # Проверяем минимальную сумму
             if amount_rub < MIN_DEPOSIT_RUB:
                 bot.answer_callback_query(call.id, f"❌ Минимальная сумма {MIN_DEPOSIT_RUB} ₽")
                 return
 
-            # Проверяем максимальную сумму
             if amount_rub > MAX_DEPOSIT_RUB:
                 bot.answer_callback_query(call.id, f"❌ Максимальная сумма {MAX_DEPOSIT_RUB} ₽")
                 return
 
             bot.answer_callback_query(call.id, "⏳ Создаем счет...")
 
-            # Получаем выбранную криптовалюту
             crypto_type = user_states.get(user_id, {}).get('selected_crypto', 'USDT')
 
-            # Создаем инвойс
             invoice = create_cryptobot_invoice(amount_rub, crypto_type)
 
             if not invoice:
@@ -1564,7 +1475,6 @@ def register_crypto_handlers(bot):
                 reply_markup=markup
             )
 
-            # Запускаем автоматическую проверку оплаты (10 минут)
             start_payment_check(call.message.chat.id, amount_rub, invoice_id, user_id, crypto_type, bot)
 
         except Exception as e:
@@ -1574,8 +1484,8 @@ def register_crypto_handlers(bot):
     def start_payment_check(chat_id, amount_rub, invoice_id, user_id, crypto_type, bot):
         """Запускает автоматическую проверку оплаты на 10 минут"""
         def check_loop():
-            max_checks = 120  # Проверяем 120 раз (10 минут)
-            check_interval = 5  # Каждые 5 секунд
+            max_checks = 120
+            check_interval = 5
 
             for i in range(max_checks):
                 try:
@@ -1588,7 +1498,6 @@ def register_crypto_handlers(bot):
                     status = invoice_info.get('status', 'active')
 
                     if status == 'paid':
-                        # Зачисляем средства
                         users_data = load_users_data()
                         if user_id not in users_data:
                             users_data[user_id] = {'balance': 0}
@@ -1598,7 +1507,6 @@ def register_crypto_handlers(bot):
 
                         pending_invoices[invoice_id]['status'] = 'paid'
 
-                        # Добавляем транзакцию в историю
                         add_transaction(user_id, amount_rub, 'deposit', 'completed', crypto_type)
 
                         success_display = f"""
@@ -1657,7 +1565,6 @@ def register_crypto_handlers(bot):
                     logging.error(f"Ошибка при проверке оплаты: {e}")
                     continue
 
-            # Если прошло 10 минут и оплаты нет
             timeout_display = f"""
 <blockquote expandable>╔══════════════════════╗
    ⏰ <b>ВРЕМЯ ОПЛАТЫ ИСТЕКЛО</b> ⏰
@@ -1686,7 +1593,6 @@ def register_crypto_handlers(bot):
             except Exception as e:
                 logging.error(f"Ошибка при обновлении сообщения таймаута: {e}")
 
-        # Запускаем проверку в отдельном потоке
         import threading
         thread = threading.Thread(target=check_loop)
         thread.daemon = True
@@ -1705,12 +1611,10 @@ def register_crypto_handlers(bot):
             try:
                 amount_rub = float(message.text)
 
-                # Проверяем минимальную сумму
                 if amount_rub < MIN_DEPOSIT_RUB:
                     bot.send_message(message.chat.id, f"❌ Минимум {MIN_DEPOSIT_RUB} ₽")
                     return
 
-                # Проверяем максимальную сумму
                 if amount_rub > MAX_DEPOSIT_RUB:
                     bot.send_message(message.chat.id, f"❌ Максимум {MAX_DEPOSIT_RUB} ₽")
                     return
@@ -1720,7 +1624,6 @@ def register_crypto_handlers(bot):
                     bot.send_message(message.chat.id, message_text)
                     return
 
-                # Получаем выбранную криптовалюту
                 crypto_type = user_states.get(user_id, {}).get('selected_crypto', 'USDT')
 
                 bot.send_message(message.chat.id, "⏳ Создаем счет...")
@@ -1768,7 +1671,6 @@ def register_crypto_handlers(bot):
                     reply_markup=markup
                 )
 
-                # Запускаем автоматическую проверку
                 start_payment_check(message.chat.id, amount_rub, invoice_id, user_id, crypto_type, bot)
 
             except ValueError:
@@ -1785,12 +1687,10 @@ def register_crypto_handlers(bot):
             users_data = load_users_data()
             balance_rub = users_data.get(user_id, {}).get('balance', 0)
 
-            # Проверяем минимальную сумму
             if amount_rub < MIN_WITHDRAW_RUB:
                 bot.answer_callback_query(call.id, f"❌ Минимум {MIN_WITHDRAW_RUB} ₽")
                 return
 
-            # Проверяем максимальную сумму
             if amount_rub > MAX_WITHDRAW_RUB:
                 bot.answer_callback_query(call.id, f"❌ Максимум {MAX_WITHDRAW_RUB} ₽")
                 return
@@ -1800,7 +1700,6 @@ def register_crypto_handlers(bot):
                 return
 
             if TREASURY_MODE == "real":
-                # Реальный режим - проверяем баланс казны
                 treasury_balance_usd, treasury_balance_rub = get_treasury_balance()
                 logging.info(f"Баланс казны для вывода: {treasury_balance_rub} ₽, запрошено: {amount_rub} ₽")
 
@@ -1810,18 +1709,15 @@ def register_crypto_handlers(bot):
 
                 bot.answer_callback_query(call.id, "⏳ Создаем чек...")
 
-                # Создаем чек автоматически (в USDT)
                 check = create_cryptobot_check(amount_rub, user_id, "USDT")
 
                 if not check:
                     bot.answer_callback_query(call.id, "❌ Ошибка создания чека")
                     return
 
-                # Списываем средства
                 users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
                 save_users_data(users_data)
 
-                # Добавляем транзакцию в историю
                 add_transaction(user_id, amount_rub, 'withdraw', 'completed', 'USDT')
 
                 current_rate = get_exchange_rate()
@@ -1855,23 +1751,19 @@ def register_crypto_handlers(bot):
                 )
 
             else:
-                # Тестовый режим - создаем заявку
                 bot.answer_callback_query(call.id, "⏳ Создаем заявку на вывод...")
 
                 username = call.from_user.username or call.from_user.first_name or "Пользователь"
 
-                # Добавляем в ожидающие выводы
                 withdrawal_id = add_pending_withdrawal(user_id, amount_rub, username, "USDT")
 
                 if not withdrawal_id:
                     bot.answer_callback_query(call.id, "❌ Ошибка создания заявки")
                     return
 
-                # Списываем средства
                 users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
                 save_users_data(users_data)
 
-                # Добавляем транзакцию в историю как pending
                 add_transaction(user_id, amount_rub, 'withdraw', 'pending', 'USDT', withdrawal_id)
 
                 current_rate = get_exchange_rate()
@@ -1879,7 +1771,7 @@ def register_crypto_handlers(bot):
 
                 display = f"""
 <blockquote expandable>╔══════════════════════╗
-   ⏳ <b>ЗАЯВКА СОЗДАНА #{withdrawal_id}</b> ⏳
+   ⏳ <b>ЗАЯВКА СОЗДАНА
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
@@ -1905,11 +1797,10 @@ def register_crypto_handlers(bot):
                     reply_markup=markup
                 )
 
-                # Уведомляем администратора
                 try:
                     admin_display = f"""
 <blockquote expandable>╔══════════════════════╗
-   ⏳ <b>НОВАЯ ЗАЯВКА #{withdrawal_id}</b> ⏳
+   ⏳ <b>НОВАЯ ЗАЯВКА
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
@@ -1956,12 +1847,10 @@ def register_crypto_handlers(bot):
                 users_data = load_users_data()
                 balance_rub = users_data.get(user_id, {}).get('balance', 0)
 
-                # Проверяем минимальную сумму
                 if amount_rub < MIN_WITHDRAW_RUB:
                     bot.send_message(message.chat.id, f"❌ Минимум {MIN_WITHDRAW_RUB} ₽")
                     return
 
-                # Проверяем максимальную сумму
                 if amount_rub > MAX_WITHDRAW_RUB:
                     bot.send_message(message.chat.id, f"❌ Максимум {MAX_WITHDRAW_RUB} ₽")
                     return
@@ -1976,7 +1865,6 @@ def register_crypto_handlers(bot):
                     return
 
                 if TREASURY_MODE == "real":
-                    # Реальный режим - проверяем баланс казны
                     treasury_balance_usd, treasury_balance_rub = get_treasury_balance()
                     logging.info(f"Баланс казны для кастомного вывода: {treasury_balance_rub} ₽, запрошено: {amount_rub} ₽")
 
@@ -1986,18 +1874,15 @@ def register_crypto_handlers(bot):
 
                     bot.send_message(message.chat.id, "⏳ Создаем чек...")
 
-                    # Создаем чек автоматически (в USDT)
                     check = create_cryptobot_check(amount_rub, user_id, "USDT")
 
                     if not check:
                         bot.send_message(message.chat.id, "❌ Ошибка создания чека")
                         return
 
-                    # Списываем средства
                     users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
                     save_users_data(users_data)
 
-                    # Добавляем транзакцию в историю
                     add_transaction(user_id, amount_rub, 'withdraw', 'completed', 'USDT')
 
                     current_rate = get_exchange_rate()
@@ -2030,23 +1915,19 @@ def register_crypto_handlers(bot):
                     )
 
                 else:
-                    # Тестовый режим - создаем заявку
                     bot.send_message(message.chat.id, "⏳ Создаем заявку на вывод...")
 
                     username = message.from_user.username or message.from_user.first_name or "Пользователь"
 
-                    # Добавляем в ожидающие выводы
                     withdrawal_id = add_pending_withdrawal(user_id, amount_rub, username, "USDT")
 
                     if not withdrawal_id:
                         bot.send_message(message.chat.id, "❌ Ошибка создания заявки")
                         return
 
-                    # Списываем средства
                     users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
                     save_users_data(users_data)
 
-                    # Добавляем транзакцию в историю как pending
                     add_transaction(user_id, amount_rub, 'withdraw', 'pending', 'USDT', withdrawal_id)
 
                     current_rate = get_exchange_rate()
@@ -2054,7 +1935,7 @@ def register_crypto_handlers(bot):
 
                     display = f"""
 <blockquote expandable>╔══════════════════════╗
-   ⏳ <b>ЗАЯВКА СОЗДАНА #{withdrawal_id}</b> ⏳
+   ⏳ <b>ЗАЯВКА СОЗДАНА
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
@@ -2079,11 +1960,10 @@ def register_crypto_handlers(bot):
                         reply_markup=markup
                     )
 
-                    # Уведомляем администратора
                     try:
                         admin_display = f"""
 <blockquote expandable>╔══════════════════════╗
-   ⏳ <b>НОВАЯ ЗАЯВКА #{withdrawal_id}</b> ⏳
+   ⏳ <b>НОВАЯ ЗАЯВКА
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
