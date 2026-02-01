@@ -5,7 +5,6 @@ from datetime import datetime
 import telebot.apihelper
 import logging
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,6 @@ def save_users_data(data):
         logger.error(f"Ошибка сохранения данных: {e}")
         return False
 
-# Глобальная переменная для username бота
 BOT_USERNAME = None
 bot = None
 
@@ -37,19 +35,17 @@ def register_referrals_handlers(bot_instance):
     global bot, BOT_USERNAME
     bot = bot_instance
 
-    # Получаем username бота
     try:
         bot_info = bot.get_me()
         BOT_USERNAME = bot_info.username
-        logger.info(f"✅ Получили username бота: @{BOT_USERNAME}")
+        logger.info(f"Получили username бота: @{BOT_USERNAME}")
     except Exception as e:
-        logger.error(f"❌ Ошибка получения username бота: {e}")
+        logger.error(f"Ошибка получения username бота: {e}")
         BOT_USERNAME = "YOUR_BOT_USERNAME"
 
     @bot.callback_query_handler(func=lambda call: call.data == "referral_system")
     def show_referral_system(call):
         try:
-            # Обработка устаревших запросов
             try:
                 bot.answer_callback_query(call.id)
             except:
@@ -68,13 +64,10 @@ def register_referrals_handlers(bot_instance):
             referral_bonus_balance = user_info.get('referral_bonus', 0)
             total_referral_income = user_info.get('total_referral_income', 0)
 
-            # Формируем реферальную ссылку
             referral_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
 
-            # Создаем кнопки БЕЗ КНОПКИ НАЗАД
             markup = types.InlineKeyboardMarkup(row_width=1)
 
-            # Кнопка вывода
             withdraw_text = "💸 Вывести на баланс"
             if referral_bonus_balance < 300:
                 withdraw_text = f"💸 Вывести на баланс (нужно {300-referral_bonus_balance}₽)"
@@ -132,12 +125,11 @@ def register_referrals_handlers(bot_instance):
                 logger.error(f"Ошибка редактирования сообщения: {e}")
 
         except Exception as e:
-            logger.error(f"❌ Ошибка в show_referral_system: {e}")
+            logger.error(f"Ошибка в show_referral_system: {e}")
 
     @bot.callback_query_handler(func=lambda call: call.data == "withdraw_referral")
     def withdraw_referral_bonus(call):
         try:
-            # Обработка устаревших запросов
             try:
                 bot.answer_callback_query(call.id)
             except:
@@ -154,7 +146,6 @@ def register_referrals_handlers(bot_instance):
             referral_bonus = user_info.get('referral_bonus', 0)
             current_balance = user_info.get('balance', 0)
 
-            # Проверка минимальной суммы
             if referral_bonus < 300:
                 bot.answer_callback_query(
                     call.id,
@@ -163,7 +154,6 @@ def register_referrals_handlers(bot_instance):
                 )
                 return
 
-            # Создаем подтверждение вывода
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
                 types.InlineKeyboardButton("✅ Да, вывести", callback_data=f"confirm_withdraw_{referral_bonus}"),
@@ -212,12 +202,11 @@ def register_referrals_handlers(bot_instance):
                     raise e
 
         except Exception as e:
-            logger.error(f"❌ Ошибка в withdraw_referral_bonus: {e}")
+            logger.error(f"Ошибка в withdraw_referral_bonus: {e}")
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_withdraw_"))
     def process_withdraw_confirmation(call):
         try:
-            # Обработка устаревших запросов
             try:
                 bot.answer_callback_query(call.id)
             except:
@@ -230,7 +219,6 @@ def register_referrals_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка! Пользователь не найден")
                 return
 
-            # Получаем сумму из callback_data
             withdraw_amount_str = call.data.split("_")[2]
             try:
                 withdraw_amount = float(withdraw_amount_str)
@@ -240,7 +228,6 @@ def register_referrals_handlers(bot_instance):
             user_info = users_data[user_id]
             referral_bonus = user_info.get('referral_bonus', 0)
 
-            # Проверяем, что сумма не изменилась
             if withdraw_amount != referral_bonus:
                 bot.answer_callback_query(
                     call.id,
@@ -249,7 +236,6 @@ def register_referrals_handlers(bot_instance):
                 )
                 return
 
-            # Проверяем минимальную суммы
             if referral_bonus < 300:
                 bot.answer_callback_query(
                     call.id,
@@ -258,15 +244,12 @@ def register_referrals_handlers(bot_instance):
                 )
                 return
 
-            # Сохраняем старые значения для лога
             old_referral_balance = referral_bonus
             old_main_balance = user_info.get('balance', 0)
 
-            # Выводим на основной баланс
             users_data[user_id]['balance'] = round(old_main_balance + referral_bonus, 2)
             users_data[user_id]['referral_bonus'] = 0
 
-            # Обновляем историю выводов
             if 'withdrawal_history' not in users_data[user_id]:
                 users_data[user_id]['withdrawal_history'] = []
 
@@ -281,7 +264,6 @@ def register_referrals_handlers(bot_instance):
 
             save_users_data(users_data)
 
-            # Формируем сообщение об успехе
             new_balance = users_data[user_id]['balance']
 
             success_text = f"""
@@ -311,7 +293,6 @@ def register_referrals_handlers(bot_instance):
 <b>✅ Теперь вы можете использовать {old_referral_balance}₽ для ставок!</b>
 """
 
-            # ТОЛЬКО КНОПКА В РЕФЕРАЛЫ (без кнопки На баланс)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("👥 В рефералы", callback_data="referral_system"))
 
@@ -329,20 +310,18 @@ def register_referrals_handlers(bot_instance):
                 else:
                     raise e
 
-            # Отправляем уведомление об успехе
             bot.answer_callback_query(
                 call.id,
                 f"✅ Успешно! {old_referral_balance}₽ переведены на основной баланс",
                 show_alert=True
             )
 
-            # Логируем операцию
-            logger.info(f"✅ Вывод реферальных средств: {user_id}")
+            logger.info(f"Вывод реферальных средств: {user_id}")
             logger.info(f"💰 Сумма: {old_referral_balance}₽")
             logger.info(f"📊 Баланс до: {old_main_balance}₽, после: {new_balance}₽")
 
         except Exception as e:
-            logger.error(f"❌ Ошибка в process_withdraw_confirmation: {e}")
+            logger.error(f"Ошибка в process_withdraw_confirmation: {e}")
             bot.answer_callback_query(
                 call.id,
                 "❌ Произошла ошибка при выводе",
@@ -352,7 +331,6 @@ def register_referrals_handlers(bot_instance):
     @bot.callback_query_handler(func=lambda call: call.data == "my_referrals")
     def show_my_referrals(call):
         try:
-            # Обработка устаревших запросов
             try:
                 bot.answer_callback_query(call.id)
             except:
@@ -474,7 +452,7 @@ def register_referrals_handlers(bot_instance):
                 logger.error(f"Ошибка в show_my_referrals: {e}")
 
         except Exception as e:
-            logger.error(f"❌ Ошибка в show_my_referrals: {e}")
+            logger.error(f"Ошибка в show_my_referrals: {e}")
 
 def add_referral_bonus(user_id, win_amount):
     """
@@ -484,34 +462,28 @@ def add_referral_bonus(user_id, win_amount):
         users_data = load_users_data()
 
         if user_id not in users_data:
-            logger.error(f"❌ Пользователь {user_id} не найден")
+            logger.error(f"Пользователь {user_id} не найден")
             return
 
-        # Получаем ID реферера
         referrer_id = users_data[user_id].get('referrer_id')
         if not referrer_id:
-            logger.error(f"❌ У пользователя {user_id} нет реферера")
+            logger.error(f"У пользователя {user_id} нет реферера")
             return
 
-        # Проверяем, существует ли реферер
         if referrer_id not in users_data:
-            logger.error(f"❌ Реферер {referrer_id} не найден")
+            logger.error(f"Реферер {referrer_id} не найден")
             return
 
-        # Вычисляем бонус (6% от суммы выигрыша)
         bonus = round(win_amount * 0.06, 2)
 
-        # Добавляем бонус в реферальный баланс
         current_bonus = users_data[referrer_id].get('referral_bonus', 0)
         users_data[referrer_id]['referral_bonus'] = round(current_bonus + bonus, 2)
 
-        # Обновляем общий доход от рефералов
         current_income = users_data[referrer_id].get('total_referral_income', 0)
         users_data[referrer_id]['total_referral_income'] = round(current_income + bonus, 2)
 
         save_users_data(users_data)
 
-        # Логируем
         logger.info(f"🎯 Реферальный бонус: {user_id} -> {referrer_id}")
         logger.info(f"💰 Сумма выигрыша: {win_amount}₽")
         logger.info(f"🎯 Бонус (6%): {bonus}₽")
@@ -519,7 +491,7 @@ def add_referral_bonus(user_id, win_amount):
         logger.info(f"📊 Всего получено {referrer_id}: {users_data[referrer_id]['total_referral_income']}₽")
 
     except Exception as e:
-        logger.error(f"❌ Ошибка при начислении реферального бонуса: {e}")
+        logger.error(f"Ошибка при начислении реферального бонуса: {e}")
 
 def process_referral_join(new_user_id, referral_code, user_data=None):
     """
@@ -530,7 +502,6 @@ def process_referral_join(new_user_id, referral_code, user_data=None):
     try:
         users_data = load_users_data()
         
-        # Исправление: referral_code - это ID пользователя, проверяем по ID
         if referral_code not in users_data:
             return {
                 'success': False,
@@ -538,7 +509,6 @@ def process_referral_join(new_user_id, referral_code, user_data=None):
                 'referrer_data': None
             }
         
-        # Проверяем, не является ли пользователь самим собой реферером
         if new_user_id == referral_code:
             return {
                 'success': False,
@@ -546,11 +516,8 @@ def process_referral_join(new_user_id, referral_code, user_data=None):
                 'referrer_data': None
             }
         
-        # ВАЖНОЕ ИСПРАВЛЕНИЕ: Проверяем, существует ли уже пользователь
         is_new_user = new_user_id not in users_data
         
-        # ЕСЛИ ПОЛЬЗОВАТЕЛЬ УЖЕ СУЩЕСТВУЕТ - НЕ ДОБАВЛЯЕМ ЕГО В РЕФЕРАЛЫ!
-        # (защита от повторного добавления)
         if not is_new_user:
             logger.info(f"⚠️ Пользователь {new_user_id} уже существует, не добавляем в рефералы")
             return {
@@ -559,8 +526,6 @@ def process_referral_join(new_user_id, referral_code, user_data=None):
                 'referrer_data': None
             }
         
-        # ТОЛЬКО ДЛЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ:
-        # 1. Создаем запись нового пользователя
         if user_data is None:
             user_data = {
                 'referrer_id': referral_code,
@@ -573,24 +538,19 @@ def process_referral_join(new_user_id, referral_code, user_data=None):
                 'games_played': 0,
                 'games_won': 0,
                 'registration_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'referral_code': new_user_id  # код для приглашения других
+                'referral_code': new_user_id
             }
         
-        # Добавляем referrer_id к данным пользователя
         user_data['referrer_id'] = referral_code
         
-        # Сохраняем нового пользователя
         users_data[new_user_id] = user_data
         
-        # 2. Добавляем в список рефералов реферера
         if 'referrals' not in users_data[referral_code]:
             users_data[referral_code]['referrals'] = []
         
-        # Проверяем, не добавляли ли уже этого реферала
         if new_user_id not in users_data[referral_code]['referrals']:
             users_data[referral_code]['referrals'].append(new_user_id)
         
-        # 3. СОХРАНЯЕМ ДАННЫЕ
         save_success = save_users_data(users_data)
         
         if not save_success:
@@ -600,11 +560,10 @@ def process_referral_join(new_user_id, referral_code, user_data=None):
                 'referrer_data': None
             }
         
-        # Получаем данные реферера для отправки сообщения
         referrer_name = users_data[referral_code].get('first_name', 'Ваш друг')
         referrer_username = users_data[referral_code].get('username', '')
         
-        logger.info(f"✅ Новый реферал зарегистрирован: {new_user_id} приглашен пользователем {referral_code}")
+        logger.info(f"Новый реферал зарегистрирован: {new_user_id} приглашен пользователем {referral_code}")
         logger.info(f"📊 Рефералов у {referral_code}: {len(users_data[referral_code]['referrals'])}")
         logger.info(f"📝 Данные пользователя {new_user_id} созданы успешно")
         
@@ -619,7 +578,7 @@ def process_referral_join(new_user_id, referral_code, user_data=None):
         }
         
     except Exception as e:
-        logger.error(f"❌ Ошибка обработки реферала: {e}")
+        logger.error(f"Ошибка обработки реферала: {e}")
         return {
             'success': False,
             'message': f'Ошибка: {str(e)}',
@@ -679,10 +638,10 @@ def send_referral_welcome_message(chat_id, referrer_data):
             welcome_text,
             parse_mode='HTML'
         )
-        logger.info(f"✅ Отправлено приветственное реферальное сообщение для чата {chat_id}")
+        logger.info(f"Отправлено приветственное реферальное сообщение для чата {chat_id}")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка отправки реферального приветствия: {e}")
+        logger.error(f"Ошибка отправки реферального приветствия: {e}")
 
 def send_referral_notification_to_referrer(referrer_id, new_user_id):
     """
@@ -693,35 +652,28 @@ def send_referral_notification_to_referrer(referrer_id, new_user_id):
         if bot is None:
             return
         
-        # Проверяем, не отправлялось ли уже уведомление для этого реферала
         users_data = load_users_data()
         if referrer_id not in users_data:
             return
         
-        # Получаем данные нового пользователя
         if new_user_id in users_data:
             new_user_data = users_data[new_user_id]
             new_user_name = new_user_data.get('first_name', 'Новый игрок')
             new_user_username = f"@{new_user_data.get('username')}" if new_user_data.get('username') else new_user_name
         else:
-            # Если пользователя нет в базе - значит произошла ошибка
-            logger.error(f"❌ Новый пользователь {new_user_id} не найден в базе данных")
+            logger.error(f"Новый пользователь {new_user_id} не найден в базе данных")
             return
         
-        # Проверяем, не было ли уже уведомления (по флагу в данных)
         if 'referral_notifications_sent' not in users_data[referrer_id]:
             users_data[referrer_id]['referral_notifications_sent'] = []
         
-        # Если уведомление для этого реферала уже отправлялось - выходим
         if new_user_id in users_data[referrer_id]['referral_notifications_sent']:
             logger.info(f"⚠️ Уведомление для реферала {new_user_id} уже отправлялось рефереру {referrer_id}")
             return
         
-        # Получаем статистику реферера
         referral_count = len(users_data[referrer_id].get('referrals', []))
         referral_bonus = users_data[referrer_id].get('referral_bonus', 0)
         
-        # Простое уведомление - только важная информация
         notification_text = f"""
 <blockquote>╔══════════════════╗
    🎉 <b>НОВЫЙ РЕФЕРАЛ</b> 🎉
@@ -737,18 +689,16 @@ def send_referral_notification_to_referrer(referrer_id, new_user_id):
 <b>🎯 Бонус:</b> 6% от выигрышей
 """
         
-        # Отправляем уведомление
         bot.send_message(
             referrer_id,
             notification_text,
             parse_mode='HTML'
         )
         
-        # Отмечаем, что уведомление отправлено
         users_data[referrer_id]['referral_notifications_sent'].append(new_user_id)
         save_users_data(users_data)
         
-        logger.info(f"✅ Отправлено уведомление рефереру {referrer_id} о новом реферале {new_user_id}")
+        logger.info(f"Отправлено уведомление рефереру {referrer_id} о новом реферале {new_user_id}")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка отправки уведомления рефереру: {e}")
+        logger.error(f"Ошибка отправки уведомления рефереру: {e}")
