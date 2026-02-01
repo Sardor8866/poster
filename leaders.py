@@ -6,7 +6,6 @@ import threading
 from datetime import datetime, timedelta
 import logging
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class LeadersModule:
@@ -79,12 +78,11 @@ class LeadersModule:
             time_filter = self.get_time_period_filter(period)
             
             turnover = 0.0
-            wins = 0.0  # Только суммарные выигрыши (положительные)
-            total_wins = 0.0  # Общая сумма выигрышей
+            wins = 0.0
+            total_wins = 0.0
             deposits = 0.0
             withdrawals = 0.0
             
-            # Считаем статистику из истории игр
             if str(user_id) in game_history:
                 for game in game_history[str(user_id)]:
                     game_time = game.get('timestamp', 0)
@@ -95,13 +93,10 @@ class LeadersModule:
                         
                         turnover += bet_amount
                         
-                        # Если выигрыш, добавляем ВЫИГРАННУЮ сумму (уже за вычетом ставки)
                         if is_win and win_amount > 0:
-                            wins += win_amount  # win_amount уже содержит чистый выигрыш
+                            wins += win_amount
                             total_wins += win_amount
-                        # ПРОИГРЫШИ НЕ ВЛИЯЮТ НА ПОКАЗАТЕЛЬ "ВЫИГРЫШИ"
             
-            # Считаем транзакции
             for transaction in transactions:
                 if str(transaction.get('user_id')) == str(user_id):
                     trans_time = transaction.get('timestamp', 0)
@@ -116,10 +111,10 @@ class LeadersModule:
             
             return {
                 'turnover': round(turnover, 2),
-                'wins': round(total_wins, 2),  # Только суммарные выигрыши
+                'wins': round(total_wins, 2),
                 'deposits': round(deposits, 2),
                 'withdrawals': round(withdrawals, 2),
-                'net_wins': round(wins, 2)  # Для внутреннего использования
+                'net_wins': round(wins, 2)
             }
         except Exception as e:
             logging.error(f"Ошибка расчета статистики для пользователя {user_id}: {e}")
@@ -175,7 +170,6 @@ class LeadersModule:
             }
             metric_name = metric_names.get(metric, "📊 ОБОРОТ")
             
-            # Эмодзи для мест
             place_emojis = {
                 1: "🥇", 2: "🥈", 3: "🥉",
                 4: "4️⃣", 5: "5️⃣", 6: "6️⃣",
@@ -183,7 +177,6 @@ class LeadersModule:
                 10: "🔟"
             }
             
-            # Новый дизайн заголовка
             message = f"""
 <blockquote expandable>╔══════════════════════════════╗
    🏆 <b>ТАБЛИЦА ЛИДЕРОВ</b> 🏆
@@ -199,21 +192,17 @@ class LeadersModule:
 
 """
             
-            # Добавляем топ-10 игроков
             for i, user in enumerate(top_users[:10], 1):
                 place_emoji = place_emojis.get(i, f"{i}.")
                 username = user['username']
                 
-                # Обрезаем длинные имена
                 if len(username) > 12:
                     username = username[:12] + "..."
                 
                 value = user['value']
                 
-                # Форматируем значение
                 value_str = f"{self.format_number(value)} ₽"
                 
-                # Форматируем строку с использованием таблицы
                 if value > 0:
                     message += f"{place_emoji} <code>{username:<15}</code> <b>{value_str}</b>\n"
                 else:
@@ -251,11 +240,10 @@ class LeadersModule:
             period_name = period_names.get(period, "ВСЁ ВРЕМЯ")
             
             turnover = self.format_number(stats['turnover'])
-            wins = self.format_number(stats['wins'])  # Только суммарные выигрыши
+            wins = self.format_number(stats['wins'])
             deposits = self.format_number(stats['deposits'])
             withdrawals = self.format_number(stats['withdrawals'])
             
-            # Профит = суммарные выигрыши - выводы
             profit = stats['wins'] - stats['withdrawals']
             if profit >= 0:
                 profit_str = f"+{self.format_number(profit)} ₽"
@@ -264,7 +252,6 @@ class LeadersModule:
                 profit_str = f"-{self.format_number(abs(profit))} ₽"
                 profit_emoji = "📉"
             
-            # Новый дизайн статистики
             message = f"""
 <blockquote expandable>╔══════════════════════════════╗
    📊 <b>ВАША СТАТИСТИКА</b> 📊
@@ -298,7 +285,6 @@ class LeadersModule:
         """Клавиатура для таблицы лидеров"""
         markup = types.InlineKeyboardMarkup(row_width=4)
         
-        # Кнопки выбора периода с улучшенными эмодзи
         periods = [
             ("🕐 Сегодня", "today"),
             ("📆 Неделя", "week"),
@@ -319,7 +305,6 @@ class LeadersModule:
         
         markup.row(*period_buttons)
         
-        # Кнопки выбора категории с улучшенными эмодзи
         categories = [
             ("📊 Оборот", "turnover"),
             ("💰 Выигрыши", "wins"),
@@ -340,7 +325,6 @@ class LeadersModule:
         
         markup.row(*category_buttons)
         
-        # Кнопка просмотра своей статистики
         markup.row(types.InlineKeyboardButton(
             "📈 Моя статистика",
             callback_data=f"leaders_mystats_{current_period}"
@@ -379,10 +363,8 @@ class LeadersModule:
         
         return markup
 
-# Создаем глобальный экземпляр
 leaders_module = LeadersModule()
 
-# Создаем бота глобально для доступа из функций
 bot = None
 
 def register_leaders_handlers(bot_instance):
@@ -396,11 +378,9 @@ def register_leaders_handlers(bot_instance):
         user_id = str(message.from_user.id)
         
         try:
-            # Определяем команду из сообщения
             text = message.text.lower().strip()
             
             if '/топ' in text or 'топ' in text or '/top' in text or '/лидеры' in text or '/leaders' in text:
-                # Показываем таблицу лидеров
                 top_users = leaders_module.get_top_users(period="all", metric="turnover", limit=10)
                 leaderboard_message = leaders_module.format_leaderboard_message(
                     top_users,
@@ -604,7 +584,6 @@ def leaders_start(message):
             parse_mode='HTML'
         )
 
-# Функции для использования в других модулях
 def update_game_history(user_id, game_data):
     """Обновляет историю игр для статистики"""
     try:
@@ -629,12 +608,10 @@ def update_game_history(user_id, game_data):
 
 def add_game_to_history(user_id, bet_amount, win_amount, is_win, game_type="mines"):
     """Добавляет игру в историю"""
-    # win_amount должен быть ЧИСТЫМ выигрышом (уже за вычетом ставки)
-    # Например: если ставка 100, коэффициент x2, то win_amount = 200 (100 чистой прибыли + 100 ставка)
     game_data = {
         'game_type': game_type,
         'bet_amount': float(bet_amount),
-        'win_amount': float(win_amount),  # Общая сумма выигрыша (ставка + чистая прибыль)
+        'win_amount': float(win_amount),
         'is_win': is_win,
         'timestamp': int(time.time())
     }
@@ -648,7 +625,6 @@ def get_leaderboard(period="all", metric="turnover", limit=10):
     """Получает топ пользователей (публичная функция)"""
     return leaders_module.get_top_users(period, metric, limit)
 
-# Экспортируем функции
 __all__ = [
     'register_leaders_handlers',
     'leaders_start',
