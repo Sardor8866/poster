@@ -100,8 +100,8 @@ def games_inline_menu(user_id):
 """
 
     markup.row(
-        types.InlineKeyboardButton("💣 Мины", callback_data="start_mines"),
-        types.InlineKeyboardButton("🏰 Башня", callback_data="start_tower")
+        types.InlineKeyboardButton("💣 Мины", callback_data="games_mines"),
+        types.InlineKeyboardButton("🏰 Башня", callback_data="games_tower")
     )
 
     markup.row(
@@ -229,7 +229,7 @@ def start_message(message):
 
 <blockquote>
 <b>🔥 ДОСТУПНЫЕ ИГРЫ:</b>
-<code>💣 Мины | 🏰 Башня | 🚀 Краш</code>
+<code>💣 Мины | 🏰 Башня</code>
 <code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
 </blockquote>
 
@@ -259,7 +259,7 @@ def start_message(message):
 
 <blockquote>
 <b>🔥 ДОСТУПНЫЕ ИГРЫ:</b>
-<code>💣 Мины | 🏰 Башня | 🚀 Краш</code>
+<code>💣 Мины | 🏰 Башня</code>
 <code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
 </blockquote>
 
@@ -294,7 +294,7 @@ def start_message(message):
 
 <blockquote>
 <b>🔥 ДОСТУПНЫЕ ИГРЫ:</b>
-<code>💣 Мины | 🏰 Башня | 🚀 Краш</code>
+<code>💣 Мины | 🏰 Башня</code>
 <code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
 </blockquote>
 
@@ -763,11 +763,11 @@ Flame Game - это современная игровая
     else:
         bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data in ["start_mines", "start_tower", "deposit", "withdraw"])
+@bot.callback_query_handler(func=lambda call: call.data in ["games_mines", "games_tower", "deposit", "withdraw"])
 def callback_handler(call):
     user_id = str(call.from_user.id)
 
-    if call.data == "start_mines":
+    if call.data == "games_mines":
         try:
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except:
@@ -785,7 +785,7 @@ def callback_handler(call):
             print(f"Ошибка запуска игры Мины: {e}")
             bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
 
-    elif call.data == "start_tower":
+    elif call.data == "games_tower":
         try:
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except:
@@ -808,6 +808,21 @@ def callback_handler(call):
 
     elif call.data == "withdraw":
         bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
+
+@bot.callback_query_handler(func=lambda call: call.data in ["games_dice", "games_basketball", "games_football", "games_darts"])
+def games_callback_handler(call):
+    """Обработчик для других игр (кости, баскетбол и т.д.)"""
+    try:
+        if call.data == "games_dice":
+            bot.answer_callback_query(call.id, "🎲 Запускаем игру Кости...")
+        elif call.data == "games_basketball":
+            bot.answer_callback_query(call.id, "🏀 Запускаем игру Баскетбол...")
+        elif call.data == "games_football":
+            bot.answer_callback_query(call.id, "⚽ Запускаем игру Футбол...")
+        elif call.data == "games_darts":
+            bot.answer_callback_query(call.id, "🎯 Запускаем игру Дартс...")
+    except Exception as e:
+        print(f"Ошибка в games_callback_handler: {e}")
 
 print("🔥 Flame Game запущен...")
 print(f"Модуль платежей: {'ВКЛЮЧЕН' if PAYMENTS_ENABLED else 'ОТКЛЮЧЕН'}")
