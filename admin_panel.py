@@ -1,4 +1,3 @@
-# admin_panel.py - ТОЛЬКО админ функции БЕЗ банов
 import telebot
 from telebot import types
 import json
@@ -6,7 +5,6 @@ import random
 import string
 from datetime import datetime
 
-# Функции для работы с данными
 def load_users_data():
     try:
         with open('users_data.json', 'r') as f:
@@ -29,7 +27,6 @@ def save_withdraw_requests(data):
     with open('withdraw_requests.json', 'w') as f:
         json.dump(data, f)
 
-# Список администраторов (замените на свои ID)
 ADMIN_IDS = [8118184388, 5046075976]
 
 def register_admin_handlers(bot):
@@ -38,7 +35,6 @@ def register_admin_handlers(bot):
     def is_admin(user_id):
         return user_id in ADMIN_IDS
 
-    # Команда /admin
     @bot.message_handler(commands=['admin'])
     def admin_panel(message):
         user_id = message.from_user.id
@@ -68,7 +64,6 @@ def register_admin_handlers(bot):
             parse_mode="HTML"
         )
 
-    # Обработка инлайн-кнопок админ-панели
     @bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
     def handle_admin_buttons(call):
         user_id = call.from_user.id
@@ -151,7 +146,6 @@ def register_admin_handlers(bot):
 
         bot.answer_callback_query(call.id)
 
-    # Меню управления выводами
     def show_withdrawals_menu(message):
         requests = load_withdraw_requests()
 
@@ -171,7 +165,7 @@ def register_admin_handlers(bot):
 
         markup = types.InlineKeyboardMarkup(row_width=2)
 
-        for i, req in enumerate(requests[:10], 1):  # Показываем первые 10 заявок
+        for i, req in enumerate(requests[:10], 1):
             user_id = req.get('user_id', 'Неизвестно')
             amount = req.get('amount', 0)
             req_id = req.get('id', i)
@@ -194,7 +188,6 @@ def register_admin_handlers(bot):
             parse_mode="HTML"
         )
 
-    # Просмотр деталей заявки на вывод
     @bot.callback_query_handler(func=lambda call: call.data.startswith('withdraw_view_'))
     def view_withdraw_request(call):
         try:
@@ -252,7 +245,6 @@ def register_admin_handlers(bot):
         except Exception as e:
             bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)}")
 
-    # Одобрение вывода
     @bot.callback_query_handler(func=lambda call: call.data.startswith('withdraw_approve_'))
     def approve_withdraw_request(call):
         try:
@@ -263,7 +255,6 @@ def register_admin_handlers(bot):
                 if req.get('id') == req_id:
                     req['status'] = 'approved'
 
-                    # Можно также списать баланс у пользователя
                     user_id = req.get('user_id')
                     users_data = load_users_data()
 
@@ -275,7 +266,6 @@ def register_admin_handlers(bot):
                             users_data[user_id]['balance'] = current_balance - amount
                             save_users_data(users_data)
 
-                    # Уведомляем пользователя
                     try:
                         bot.send_message(
                             user_id,
@@ -301,7 +291,6 @@ def register_admin_handlers(bot):
         except Exception as e:
             bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)}")
 
-    # Отклонение вывода
     @bot.callback_query_handler(func=lambda call: call.data.startswith('withdraw_reject_'))
     def reject_withdraw_request(call):
         try:
@@ -312,7 +301,6 @@ def register_admin_handlers(bot):
                 if req.get('id') == req_id:
                     req['status'] = 'rejected'
 
-                    # Уведомляем пользователя
                     user_id = req.get('user_id')
                     try:
                         bot.send_message(
@@ -336,7 +324,6 @@ def register_admin_handlers(bot):
         except Exception as e:
             bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)}")
 
-    # Рассылка сообщений
     def process_broadcast(message):
         broadcast_text = message.text
         users_data = load_users_data()
@@ -380,13 +367,11 @@ def register_admin_handlers(bot):
             parse_mode="HTML"
         )
 
-    # Обработка кнопки "Назад"
     @bot.callback_query_handler(func=lambda call: call.data == "admin_back")
     def handle_back_button(call):
         admin_panel(call.message)
         bot.answer_callback_query(call.id)
 
-    # Функции для работы с балансом
     def process_give_balance(message):
         try:
             parts = message.text.split()
@@ -403,7 +388,6 @@ def register_admin_handlers(bot):
                 bot.send_message(message.chat.id, f"❌ Пользователь с ID {user_id} не найден.")
                 return
 
-            # Обновляем баланс
             current_balance = users_data[user_id].get('balance', 0)
             users_data[user_id]['balance'] = current_balance + amount
             save_users_data(users_data)
@@ -419,7 +403,6 @@ def register_admin_handlers(bot):
                 parse_mode="HTML"
             )
 
-            # Уведомляем пользователя
             try:
                 bot.send_message(
                     user_id,
@@ -453,7 +436,6 @@ def register_admin_handlers(bot):
                 bot.send_message(message.chat.id, f"❌ Пользователь с ID {user_id} не найден.")
                 return
 
-            # Устанавливаем баланс
             users_data[user_id]['balance'] = amount
             save_users_data(users_data)
 
@@ -493,7 +475,6 @@ def register_admin_handlers(bot):
                 bot.send_message(message.chat.id, f"❌ Недостаточно средств. У пользователя только {current_balance}₽")
                 return
 
-            # Снимаем баланс
             users_data[user_id]['balance'] = current_balance - amount
             save_users_data(users_data)
 
@@ -557,7 +538,6 @@ def register_admin_handlers(bot):
 <b>📈 ПОСЛЕДНИЕ 10 ПОЛЬЗОВАТЕЛЕЙ:</b>
 """
 
-        # Берем последних 10 пользователей
         recent_users = list(users_data.items())[-10:]
 
         for i, (uid, user_data) in enumerate(recent_users, 1):
@@ -567,4 +547,4 @@ def register_admin_handlers(bot):
 
         bot.send_message(message.chat.id, stats_text, parse_mode="HTML")
 
-    print("✅ Админ-команды зарегистрированы!")
+    print(" Админ-команды зарегистрированы!")
