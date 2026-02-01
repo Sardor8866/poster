@@ -93,21 +93,13 @@ def games_mines_tower_handler(call):
             print(f"Общая ошибка в обработке Башни: {e}")
             bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
 
-@bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw", "profile_deposit", "profile_withdraw"])
+@bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw"])
 def payment_callback_handler(call):
-    user_id = str(call.from_user.id)
+    if call.data == "deposit":
+        bot.answer_callback_query(call.id, "📥 Пополнение баланса временно недоступно!")
 
-    if call.data in ["deposit", "profile_deposit"]:
-        if PAYMENTS_ENABLED:
-            bot.answer_callback_query(call.id, "📥 Пополнение баланса скоро будет доступно!")
-        else:
-            bot.answer_callback_query(call.id, "📥 Пополнение баланса временно недоступно!")
-
-    elif call.data in ["withdraw", "profile_withdraw"]:
-        if PAYMENTS_ENABLED:
-            bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
-        else:
-            bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
+    elif call.data == "withdraw":
+        bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
 
 
 leaders.register_leaders_handlers(bot)
