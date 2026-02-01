@@ -27,7 +27,7 @@ except ImportError as e:
     print(f"Модуль платежей не найден: {e}")
     print("Функции пополнения и вывода недоступны")
 
-bot = telebot.TeleBot("8492517983:AAFyp_KsZyIVBaYqY2CRbjKYHCky3WuwxUQ")
+bot = telebot.TeleBot("8531951028:AAHpjHaMxhUSQQUCuaKaweni-f4AXZ_Tk9A")
 
 RENDER = os.environ.get('RENDER', False)
 
@@ -924,3 +924,4 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
+
