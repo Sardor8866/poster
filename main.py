@@ -43,6 +43,73 @@ WEBHOOK_URL_PATH = f"/webhook/{bot.token}/"
 
 app = Flask(__name__)
 
+@bot.callback_query_handler(func=lambda call: call.data in ["games_mines", "games_tower"])
+def games_mines_tower_handler(call):
+    user_id = str(call.from_user.id)
+    
+    if call.data == "games_mines":
+        try:
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except:
+                pass
+            
+            try:
+                fake_message = type('obj', (object,), {
+                    'chat': type('obj', (object,), {'id': call.message.chat.id}),
+                    'from_user': call.from_user,
+                    'message_id': call.message.message_id,
+                    'text': "💣 Мины"
+                })()
+                mines.mines_start(fake_message)
+            except Exception as e:
+                print(f"Ошибка запуска игры Мины: {e}")
+                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+        
+        except Exception as e:
+            print(f"Общая ошибка в обработке Мины: {e}")
+            bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
+    
+    elif call.data == "games_tower":
+        try:
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except:
+                pass
+            
+            try:
+                fake_message = type('obj', (object,), {
+                    'chat': type('obj', (object,), {'id': call.message.chat.id}),
+                    'from_user': call.from_user,
+                    'message_id': call.message.message_id,
+                    'text': "🏰 Башня"
+                })()
+                tower.tower_start(fake_message)
+            except Exception as e:
+                print(f"Ошибка запуска игры Башня: {e}")
+                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+        
+        except Exception as e:
+            print(f"Общая ошибка в обработке Башни: {e}")
+            bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
+
+@bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw", "profile_deposit", "profile_withdraw"])
+def payment_callback_handler(call):
+    user_id = str(call.from_user.id)
+
+    if call.data in ["deposit", "profile_deposit"]:
+        if PAYMENTS_ENABLED:
+            bot.answer_callback_query(call.id, "📥 Пополнение баланса скоро будет доступно!")
+        else:
+            bot.answer_callback_query(call.id, "📥 Пополнение баланса временно недоступно!")
+
+    elif call.data in ["withdraw", "profile_withdraw"]:
+        if PAYMENTS_ENABLED:
+            bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
+        else:
+            bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
+
+
 leaders.register_leaders_handlers(bot)
 mines.register_mines_handlers(bot)
 tower.register_tower_handlers(bot)
@@ -762,84 +829,6 @@ Flame Game - это современная игровая
 
     else:
         bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
-
-@bot.callback_query_handler(func=lambda call: call.data in ["games_mines", "games_tower"])
-def games_mines_tower_handler(call):
-    user_id = str(call.from_user.id)
-    
-    if call.data == "games_mines":
-        try:
-            # Удаляем сообщение с меню
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except:
-                pass
-            
-            # Запускаем игру Мины
-            try:
-                
-                # Создаем fake message для передачи в mines_start
-                fake_message = type('obj', (object,), {
-                    'chat': type('obj', (object,), {'id': call.message.chat.id}),
-                    'from_user': call.from_user,
-                    'message_id': call.message.message_id,
-                    'text': "💣 Мины"
-                })()
-                mines.mines_start(fake_message)
-            except Exception as e:
-                print(f"Ошибка запуска игры Мины: {e}")
-                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
-        
-        except Exception as e:
-            print(f"Общая ошибка в обработке Мины: {e}")
-            bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
-    
-    elif call.data == "games_tower":
-        try:
-            # Удаляем сообщение с меню
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except:
-                pass
-            
-            # Запускаем игру Башня
-            try:
-                
-                # Создаем fake message для передачи в tower_start
-                fake_message = type('obj', (object,), {
-                    'chat': type('obj', (object,), {'id': call.message.chat.id}),
-                    'from_user': call.from_user,
-                    'message_id': call.message.message_id,
-                    'text': "🏰 Башня"
-                })()
-                tower.tower_start(fake_message)
-            except Exception as e:
-                print(f"Ошибка запуска игры Башня: {e}")
-                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
-        
-        except Exception as e:
-            print(f"Общая ошибка в обработке Башни: {e}")
-            bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
-
-@bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw", "profile_deposit", "profile_withdraw"])
-def payment_callback_handler(call):
-    user_id = str(call.from_user.id)
-
-    if call.data in ["deposit", "profile_deposit"]:
-        if PAYMENTS_ENABLED:
-            bot.answer_callback_query(call.id, "📥 Пополнение баланса скоро будет доступно!")
-        else:
-            bot.answer_callback_query(call.id, "📥 Пополнение баланса временно недоступно!")
-
-    elif call.data in ["withdraw", "profile_withdraw"]:
-        if PAYMENTS_ENABLED:
-            bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
-        else:
-            bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
-
-print("🔥 Flame Game запущен...")
-print(f"Модуль платежей: {'ВКЛЮЧЕН' if PAYMENTS_ENABLED else 'ОТКЛЮЧЕН'}")
-print(f"Вебхук: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}")
 
 @app.route(WEBHOOK_URL_PATH, methods=['POST'])
 def webhook():
