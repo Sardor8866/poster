@@ -763,66 +763,71 @@ Flame Game - это современная игровая
     else:
         bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data in ["games_mines", "games_tower", "deposit", "withdraw"])
-def callback_handler(call):
+@bot.callback_query_handler(func=lambda call: call.data in ["games_mines", "games_tower"])
+def games_mines_tower_handler(call):
     user_id = str(call.from_user.id)
-
+    
     if call.data == "games_mines":
         try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
-        try:
-            from mines import mines_start
-            fake_message = type('obj', (object,), {
-                'chat': type('obj', (object,), {'id': call.message.chat.id}),
-                'from_user': call.from_user,
-                'message_id': call.message.message_id,
-                'text': "💣 Мины"
-            })()
-            mines_start(fake_message)
-        except Exception as e:
-            print(f"Ошибка запуска игры Мины: {e}")
-            bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
-
+            # Удаляем сообщение с меню
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except:
+                pass
+            
+            # Запускаем игру Мины
+            try:
+                from mines import mines_start
+                # Создаем fake message для передачи в mines_start
+                fake_message = type('obj', (object,), {
+                    'chat': type('obj', (object,), {'id': call.message.chat.id}),
+                    'from_user': call.from_user,
+                    'message_id': call.message.message_id,
+                    'text': "💣 Мины"
+                })()
+                mines_start(fake_message)
+            except Exception as e:
+                print(f"Ошибка запуска игры Мины: {e}")
+                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+    
     elif call.data == "games_tower":
         try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
-        try:
-            from tower import tower_start
-            fake_message = type('obj', (object,), {
-                'chat': type('obj', (object,), {'id': call.message.chat.id}),
-                'from_user': call.from_user,
-                'message_id': call.message.message_id,
-                'text': "🏰 Башня"
-            })()
-            tower_start(fake_message)
-        except Exception as e:
-            print(f"Ошибка запуска игры Башня: {e}")
-            bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+            # Удаляем сообщение с меню
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except:
+                pass
+            
+            # Запускаем игру Башня
+            try:
+                from tower import tower_start
+                # Создаем fake message для передачи в tower_start
+                fake_message = type('obj', (object,), {
+                    'chat': type('obj', (object,), {'id': call.message.chat.id}),
+                    'from_user': call.from_user,
+                    'message_id': call.message.message_id,
+                    'text': "🏰 Башня"
+                })()
+                tower_start(fake_message)
+            except Exception as e:
+                print(f"Ошибка запуска игры Башня: {e}")
+                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
 
-    elif call.data == "deposit":
-        bot.answer_callback_query(call.id, "📥 Пополнение баланса скоро будет доступно!")
+@bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw", "profile_deposit", "profile_withdraw"])
+def payment_callback_handler(call):
+    user_id = str(call.from_user.id)
 
-    elif call.data == "withdraw":
-        bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
+    if call.data in ["deposit", "profile_deposit"]:
+        if PAYMENTS_ENABLED:
+            bot.answer_callback_query(call.id, "📥 Пополнение баланса скоро будет доступно!")
+        else:
+            bot.answer_callback_query(call.id, "📥 Пополнение баланса временно недоступно!")
 
-@bot.callback_query_handler(func=lambda call: call.data in ["games_dice", "games_basketball", "games_football", "games_darts"])
-def games_callback_handler(call):
-    """Обработчик для других игр (кости, баскетбол и т.д.)"""
-    try:
-        if call.data == "games_dice":
-            bot.answer_callback_query(call.id, "🎲 Запускаем игру Кости...")
-        elif call.data == "games_basketball":
-            bot.answer_callback_query(call.id, "🏀 Запускаем игру Баскетбол...")
-        elif call.data == "games_football":
-            bot.answer_callback_query(call.id, "⚽ Запускаем игру Футбол...")
-        elif call.data == "games_darts":
-            bot.answer_callback_query(call.id, "🎯 Запускаем игру Дартс...")
-    except Exception as e:
-        print(f"Ошибка в games_callback_handler: {e}")
+    elif call.data in ["withdraw", "profile_withdraw"]:
+        if PAYMENTS_ENABLED:
+            bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
+        else:
+            bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
 
 print("🔥 Flame Game запущен...")
 print(f"Модуль платежей: {'ВКЛЮЧЕН' if PAYMENTS_ENABLED else 'ОТКЛЮЧЕН'}")
