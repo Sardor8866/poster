@@ -384,7 +384,7 @@ def start_message(message):
 
     print(f"=== ЗАВЕРШЕНО ОБРАБОТКА /start ===\n")
 
-@bot.message_handler(func=lambda message: message.text and message.text.lower() in ['баланс', '/баланс', 'balance', '/balance'])
+@bot.message_handler(func=lambda message: message.text and message.text.strip().lower() in ['баланс', '/баланс', 'balance', '/balance', 'бал', '/бал'])
 def balance_command(message):
     users_data = load_users_data()
     user_id = str(message.from_user.id)
@@ -493,7 +493,7 @@ def profile_command(message):
             reply_to_message_id=message.message_id
         )
 
-@bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['/pay', 'дать', 'перевести', 'перевод']))
+@bot.message_handler(func=lambda message: (message.text and message.text.strip() and message.text.strip().split()[0].lower() in ['/pay', 'дать', 'перевести', 'перевод']))
 def pay_command(message):
     users_data = load_users_data()
     sender_id = str(message.from_user.id)
