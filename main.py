@@ -43,6 +43,13 @@ WEBHOOK_URL_PATH = f"/webhook/{bot.token}/"
 
 app = Flask(__name__)
 
+leaders.register_leaders_handlers(bot)
+mines.register_mines_handlers(bot)
+tower.register_tower_handlers(bot)
+register_referrals_handlers(bot)
+register_admin_handlers(bot)
+register_games_handlers(bot)
+
 if PAYMENTS_ENABLED:
     register_crypto_handlers(bot)
     print("Хендлеры платежей зарегистрированы")
@@ -93,8 +100,8 @@ def games_inline_menu(user_id):
 """
 
     markup.row(
-        types.InlineKeyboardButton("💣 Мины", callback_data="game_mines"),
-        types.InlineKeyboardButton("🏰 Башня", callback_data="game_tower")
+        types.InlineKeyboardButton("💣 Мины", callback_data="start_mines"),
+        types.InlineKeyboardButton("🏰 Башня", callback_data="start_tower")
     )
 
     markup.row(
@@ -756,11 +763,11 @@ Flame Game - это современная игровая
     else:
         bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data in ["game_mines", "game_tower", "deposit", "withdraw"])
+@bot.callback_query_handler(func=lambda call: call.data in ["start_mines", "start_tower", "deposit", "withdraw"])
 def callback_handler(call):
     user_id = str(call.from_user.id)
 
-    if call.data == "game_mines":
+    if call.data == "start_mines":
         try:
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except:
@@ -778,7 +785,7 @@ def callback_handler(call):
             print(f"Ошибка запуска игры Мины: {e}")
             bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
 
-    elif call.data == "game_tower":
+    elif call.data == "start_tower":
         try:
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except:
@@ -801,13 +808,6 @@ def callback_handler(call):
 
     elif call.data == "withdraw":
         bot.answer_callback_query(call.id, "📤 Вывод средств скоро будет доступен!")
-
-leaders.register_leaders_handlers(bot)
-mines.register_mines_handlers(bot)
-tower.register_tower_handlers(bot)
-register_referrals_handlers(bot)
-register_admin_handlers(bot)
-register_games_handlers(bot)
 
 print("🔥 Flame Game запущен...")
 print(f"Модуль платежей: {'ВКЛЮЧЕН' if PAYMENTS_ENABLED else 'ОТКЛЮЧЕН'}")
