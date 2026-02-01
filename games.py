@@ -1,4 +1,3 @@
-# games_module.py
 import telebot
 from telebot import types
 import random
@@ -8,31 +7,24 @@ import threading
 import logging
 import hashlib
 
-# Импорт функций из модуля лидеров
 try:
     from leaders import add_game_to_history
 except ImportError:
-    # Функция-заглушка, если модуль лидеров не найден
     def add_game_to_history(user_id, bet_amount, win_amount, is_win, game_type="dice"):
         logging.warning(f"Модуль лидеров не найден, игра не записана в историю: {user_id}")
         return False
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Потокобезопасный словарь для активных ставок и времени последнего нажатия
 active_bets = {}
 last_click_time = {}
 bet_lock = threading.Lock()
-# Словарь для отслеживания активных игр пользователя
 active_games = {}
-# Словарь для защиты от дублирования ставок
 game_session_tokens = {}
 
-# Минимальная и максимальная ставка в рублях
-MIN_BET_DICE = 1  # Минимальная ставка для кубов - 1 рубль
-MIN_BET_OTHER = 25  # Минимальная ставка для других игр - 25 рублей
-MAX_BET = float('inf')  # Максимальная ставка неограничена
+MIN_BET_DICE = 1
+MIN_BET_OTHER = 25
+MAX_BET = float('inf')
 
 def get_min_bet(game_type):
     """Возвращает минимальную ставку в зависимости от типа игры"""
@@ -87,25 +79,21 @@ def add_referral_bonus(user_id, win_amount):
     ВАЖНОЕ ИСПРАВЛЕНИЕ: Делаем начисление БЕЗОПАСНЫМ
     """
     try:
-        # Загружаем данные
         users_data = load_users_data()
         
         if user_id not in users_data:
             logging.error(f"Пользователь {user_id} не найден")
             return False
 
-        # Получаем ID реферера
         referrer_id = users_data[user_id].get('referrer_id')
         if not referrer_id:
             logging.info(f"У {user_id} нет реферера")
             return False
 
-        # Проверяем реферера
         if referrer_id not in users_data:
             logging.error(f"Реферер {referrer_id} не найден")
             return False
 
-        # Вычисляем бонус
         bonus = round(win_amount * 0.06, 2)
         if bonus <= 0:
             logging.info(f"Бонус 0 для выигрыша {win_amount}")
@@ -117,22 +105,17 @@ def add_referral_bonus(user_id, win_amount):
         logging.info(f"Выигрыш: {win_amount}₽")
         logging.info(f"Бонус (6%): {bonus}₽")
 
-        # Загружаем еще раз, чтобы получить свежие данные
         users_data = load_users_data()
         
-        # Получаем текущие значения
         old_bonus = users_data[referrer_id].get('referral_bonus', 0)
         old_total = users_data[referrer_id].get('total_referral_income', 0)
         
         logging.info(f"Было у реферера: баланс={old_bonus}₽, всего={old_total}₽")
 
-        # Обновляем значения
         users_data[referrer_id]['referral_bonus'] = round(old_bonus + bonus, 2)
         users_data[referrer_id]['total_referral_income'] = round(old_total + bonus, 2)
 
-        # Сохраняем
         if save_users_data(users_data):
-            # Проверяем, что сохранилось
             check_data = load_users_data()
             if referrer_id in check_data:
                 new_bonus = check_data[referrer_id].get('referral_bonus', 0)
@@ -171,7 +154,6 @@ def get_bet_selection_keyboard():
     markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="games_custom_bet"))
     return markup
 
-# 🎲 КОСТИ
 def get_dice_selection_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -187,7 +169,6 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
     try:
         users_data = load_users_data()
         
-        # Проверка баланса
         if user_id not in users_data:
             users_data[user_id] = {'balance': 0}
             save_users_data(users_data)
@@ -196,7 +177,6 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         
         balance = users_data[user_id].get('balance', 0)
         
-        # Проверки ставки для костей (1 рубль минимальная)
         if bet_amount < MIN_BET_DICE:
             bot.reply_to(message, f"❌ Минимальная ставка: {MIN_BET_DICE}₽!")
             return
@@ -204,20 +184,15 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             bot.reply_to(message, "❌ Недостаточно средств!")
             return
         
-        # Списываем ставку
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        # Показываем анимацию броска
         dice_msg = bot.send_dice(message.chat.id, emoji='🎲')
         
-        # Ждем 3 секунды
         time.sleep(3)
         
-        # Получаем результат
         dice_value = dice_msg.dice.value
         
-        # Проверяем выигрыш
         win = False
         multiplier = 1.8
         bet_type_name = get_dice_bet_name_chat(bet_type)
@@ -233,16 +208,13 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         else:
             multiplier = 0
         
-        # Обновляем баланс
         if win:
             win_amount = round(bet_amount * multiplier, 2)
-            # Загружаем снова свежие данные
             users_data = load_users_data()
             current_balance = users_data[user_id].get('balance', 0)
             users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
             save_users_data(users_data)
             
-            # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -254,7 +226,6 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             except Exception as e:
                 logging.error(f"Ошибка записи выигрыша в историю: {e}")
             
-            # НАЧИСЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС
             logging.info(f"🎲 Кости (чат): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
             
@@ -271,7 +242,6 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         else:
             users_data = load_users_data()
             
-            # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -302,45 +272,38 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
 
 def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
     try:
-        # Проверяем активную игру пользователя
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
-                return  # Игра уже запущена
+                return
             active_games[user_id] = session_token
 
-        # Показываем анимацию броска
         dice_msg = bot.send_dice(call.message.chat.id, emoji='🎲')
 
-        # Ждем 3 секунды
         time.sleep(3)
 
-        # Получаем результат
         dice_value = dice_msg.dice.value
         users_data = load_users_data()
 
-        # Проверяем выигрыш с новой логикой
         win = False
         multiplier = 1.8
 
-        if bet_type == "even" and dice_value in [2, 4, 6]:  # Четные: 2,4,6
+        if bet_type == "even" and dice_value in [2, 4, 6]:
             win = True
-        elif bet_type == "odd" and dice_value in [1, 3, 5]:  # Нечетные: 1,3,5
+        elif bet_type == "odd" and dice_value in [1, 3, 5]:
             win = True
-        elif bet_type == "high" and dice_value in [4, 5, 6]:  # Больше 3: 4,5,6
+        elif bet_type == "high" and dice_value in [4, 5, 6]:
             win = True
-        elif bet_type == "low" and dice_value in [1, 2, 3]:  # Меньше 4: 1,2,3
+        elif bet_type == "low" and dice_value in [1, 2, 3]:
             win = True
         else:
             multiplier = 0
 
-        # Обновляем баланс
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             current_balance = users_data[user_id].get('balance', 0)
             users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
             save_users_data(users_data)
             
-            # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -352,7 +315,6 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
             except Exception as e:
                 logging.error(f"Ошибка записи выигрыша в историю: {e}")
             
-            # НАЧИСЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС
             logging.info(f"🎲 Кости (инлайн): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             success = add_referral_bonus(user_id, win_amount)
             logging.info(f"Результат начисления: {'УСПЕХ' if success else 'ОШИБКА'}")
@@ -370,7 +332,6 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
             users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
             save_users_data(users_data)
 
-            # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -392,14 +353,12 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
 
-        # Отправляем результат новым сообщением
         bot.send_message(
             call.message.chat.id,
             result_text,
             parse_mode='HTML'
         )
 
-        # Очищаем активную игру
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
                 del active_games[user_id]
@@ -410,7 +369,6 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
     except Exception as e:
         logging.error(f"Ошибка в игре в кости: {e}")
-        # Очищаем активную игру при ошибке
         with bet_lock:
             if user_id in active_games:
                 del active_games[user_id]
@@ -448,7 +406,6 @@ def get_dice_bet_name_chat(bet_type):
         return "📉 Меньше 4"
     return bet_type
 
-# 🏀 БАСКЕТБОЛ
 def get_basketball_selection_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=3)
     markup.add(
@@ -463,7 +420,6 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
     try:
         users_data = load_users_data()
         
-        # Проверка баланса
         if user_id not in users_data:
             users_data[user_id] = {'balance': 0}
             save_users_data(users_data)
@@ -472,7 +428,6 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
         
         balance = users_data[user_id].get('balance', 0)
         
-        # Проверки ставки для баскетбола (25 рублей минимальная)
         if bet_amount < MIN_BET_OTHER:
             bot.reply_to(message, f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
             return
@@ -480,31 +435,25 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
             bot.reply_to(message, "❌ Недостаточно средств!")
             return
         
-        # Списываем ставку
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        # Показываем анимацию броска
         basketball_msg = bot.send_dice(message.chat.id, emoji='🏀')
         
-        # Ждем 3 секунды
         time.sleep(3)
         
-        # Получаем результат
         dice_value = basketball_msg.dice.value
         
-        # Логика баскетбола
         if dice_value == 4:
-            result = "goal"      # Обычный гол
+            result = "goal"
         elif dice_value == 5:
-            result = "three"     # Трехочковый
-        else:  # dice_value 1,2,3
-            result = "miss"      # Мяч мимо
+            result = "three"
+        else:
+            result = "miss"
         
         win = False
         bet_type_name = get_basketball_bet_name_chat(bet_type)
         
-        # Проверяем выигрыш
         if bet_type in ["мимо", "miss"] and result == "miss":
             win = True
             multiplier = 2.0
@@ -517,7 +466,6 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
         else:
             multiplier = 0
         
-        # Обновляем баланс
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             users_data = load_users_data()
@@ -525,7 +473,6 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
             users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
             save_users_data(users_data)
             
-            # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -537,7 +484,6 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
             except Exception as e:
                 logging.error(f"Ошибка записи выигрыша в историю: {e}")
             
-            # НАЧИСЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС
             logging.info(f"🏀 Баскетбол (чат): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
             
@@ -554,7 +500,6 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
         else:
             users_data = load_users_data()
             
-            # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -585,43 +530,32 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
 
 def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token):
     try:
-        # Проверяем активную игру пользователя
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
-                return  # Игра уже запущена
+                return
             active_games[user_id] = session_token
 
-        # Показываем анимацию броска
         basketball_msg = bot.send_dice(call.message.chat.id, emoji='🏀')
 
-        # Ждем 3 секунды
         time.sleep(3)
 
-        # Получаем результат (значение кости баскетбола)
         dice_value = basketball_msg.dice.value
         users_data = load_users_data()
 
-        # ФИНАЛЬНАЯ ЛОГИКА ДЛЯ БАСКЕТБОЛА
-        # Значения dice_value для эмоджи 🏀:
-        # 1-3 = мимо или застревает (значение 3 тоже мимо)
-        # 4 = обычный гол (2 очка)
-        # 5 = трехочковый
 
         if dice_value == 4:
-            result = "goal"      # Обычный гол (2 очка)
+            result = "goal"
         elif dice_value == 5:
-            result = "three"     # Трехочковый
-        else:  # dice_value 1,2,3
-            result = "miss"      # Мяч мимо или застревает
+            result = "three"
+        else:
+            result = "miss"
 
         win = False
 
-        # ЛОГИКА ВЫИГРЫША
-        # 3-очковый считается за гол при ставке на гол
         if bet_type == "miss" and result == "miss":
             win = True
             multiplier = 2.0
-        elif bet_type == "goal" and result in ["goal", "three"]:  # 3-очковый тоже гол
+        elif bet_type == "goal" and result in ["goal", "three"]:
             win = True
             multiplier = 2.0
         elif bet_type == "three" and result == "three":
@@ -630,14 +564,12 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
         else:
             multiplier = 0
 
-        # Обновляем баланс
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             current_balance = users_data[user_id].get('balance', 0)
             users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
             save_users_data(users_data)
             
-            # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -649,7 +581,6 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
             except Exception as e:
                 logging.error(f"Ошибка записи выигрыша в историю: {e}")
             
-            # НАЧИСЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС
             logging.info(f"🏀 Баскетбол (инлайн): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
 
@@ -666,7 +597,6 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
             users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
             save_users_data(users_data)
 
-            # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -688,14 +618,12 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
 
-        # Отправляем результат новым сообщением
         bot.send_message(
             call.message.chat.id,
             result_text,
             parse_mode='HTML'
         )
 
-        # Очищаем активную игру
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
                 del active_games[user_id]
@@ -706,7 +634,6 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
 
     except Exception as e:
         logging.error(f"Ошибка в игре в баскетбол: {e}")
-        # Очищаем активную игру при ошибке
         with bet_lock:
             if user_id in active_games:
                 del active_games[user_id]
@@ -750,7 +677,6 @@ def get_basketball_result_emoji(result):
     }
     return emojis.get(result, result)
 
-# ⚽ ФУТБОЛ
 def get_football_selection_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -764,7 +690,6 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
     try:
         users_data = load_users_data()
         
-        # Проверка баланса
         if user_id not in users_data:
             users_data[user_id] = {'balance': 0}
             save_users_data(users_data)
@@ -773,7 +698,6 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
         
         balance = users_data[user_id].get('balance', 0)
         
-        # Проверки ставки для футбола (25 рублей минимальная)
         if bet_amount < MIN_BET_OTHER:
             bot.reply_to(message, f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
             return
@@ -781,29 +705,23 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
             bot.reply_to(message, "❌ Недостаточно средств!")
             return
         
-        # Списываем ставку
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        # Показываем анимацию удара
         football_msg = bot.send_dice(message.chat.id, emoji='⚽')
         
-        # Ждем 3.5 секунды
         time.sleep(3.5)
         
-        # Получаем результат
         dice_value = football_msg.dice.value
         
-        # Логика футбола
-        if dice_value >= 3:  # 3,4,5 - гол
+        if dice_value >= 3:
             result = "goal"
-        else:  # 1,2 - мимо
+        else:
             result = "miss"
         
         win = False
         bet_type_name = get_football_bet_name_chat(bet_type)
         
-        # Проверяем выигрыш
         if bet_type in ["мимо", "miss"] and result == "miss":
             win = True
             multiplier = 1.8
@@ -813,7 +731,6 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
         else:
             multiplier = 0
         
-        # Обновляем баланс
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             users_data = load_users_data()
@@ -821,7 +738,6 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
             users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
             save_users_data(users_data)
             
-            # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -833,7 +749,6 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
             except Exception as e:
                 logging.error(f"Ошибка записи выигрыша в историю: {e}")
             
-            # НАЧИСЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС
             logging.info(f"⚽ Футбол (чат): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
             
@@ -850,7 +765,6 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
         else:
             users_data = load_users_data()
             
-            # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -881,32 +795,25 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
 
 def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
     try:
-        # Проверяем активную игру пользователя
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
-                return  # Игра уже запущена
+                return
             active_games[user_id] = session_token
 
-        # Показываем анимацию удара
         football_msg = bot.send_dice(call.message.chat.id, emoji='⚽')
 
-        # Ждем 3.5 секунды
         time.sleep(3.5)
 
-        # Получаем результат (значение кости футбола)
         dice_value = football_msg.dice.value
         users_data = load_users_data()
 
-        # ПРАВИЛЬНАЯ ЛОГИКА ДЛЯ ФУТБОЛА
-        # dice_value: 1-2 = мимо, 3-5 = гол
-        if dice_value >= 3:  # 3,4,5 - гол
+        if dice_value >= 3:
             result = "goal"
-        else:  # 1,2 - мимо
+        else:
             result = "miss"
 
         win = False
 
-        # Проверяем выигрыш с новыми множителями
         if bet_type == "miss" and result == "miss":
             win = True
             multiplier = 1.8
@@ -916,14 +823,12 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
         else:
             multiplier = 0
 
-        # Обновляем баланс
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             current_balance = users_data[user_id].get('balance', 0)
             users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
             save_users_data(users_data)
             
-            # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -935,7 +840,6 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
             except Exception as e:
                 logging.error(f"Ошибка записи выигрыша в историю: {e}")
             
-            # НАЧИСЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС
             logging.info(f"⚽ Футбол (инлайн): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
 
@@ -952,7 +856,6 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
             users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
             save_users_data(users_data)
 
-            # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -974,14 +877,12 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
 
-        # Отправляем результат новым сообщением
         bot.send_message(
             call.message.chat.id,
             result_text,
             parse_mode='HTML'
         )
 
-        # Очищаем активную игру
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
                 del active_games[user_id]
@@ -992,7 +893,6 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
     except Exception as e:
         logging.error(f"Ошибка в игре в футбол: {e}")
-        # Очищаем активную игру при ошибке
         with bet_lock:
             if user_id in active_games:
                 del active_games[user_id]
@@ -1032,7 +932,6 @@ def get_football_result_emoji(result):
     }
     return emojis.get(result, result)
 
-# 🎯 ДАРТС
 def get_darts_selection_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -1048,7 +947,6 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
     try:
         users_data = load_users_data()
         
-        # Проверка баланса
         if user_id not in users_data:
             users_data[user_id] = {'balance': 0}
             save_users_data(users_data)
@@ -1057,7 +955,6 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         
         balance = users_data[user_id].get('balance', 0)
         
-        # Проверки ставки для дартса (25 рублей минимальная)
         if bet_amount < MIN_BET_OTHER:
             bot.reply_to(message, f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
             return
@@ -1065,33 +962,27 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             bot.reply_to(message, "❌ Недостаточно средств!")
             return
         
-        # Списываем ставку
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        # Показываем анимацию броска
         darts_msg = bot.send_dice(message.chat.id, emoji='🎯')
         
-        # Ждем 3 секунды
         time.sleep(3)
         
-        # Получаем результат
         dice_value = darts_msg.dice.value
         
-        # Логика дартса
         if dice_value == 1:
-            result = "miss"      # ❌ Мимо
+            result = "miss"
         elif dice_value == 6:
-            result = "bullseye"  # 🎯 Центр (красный)
+            result = "bullseye"
         elif dice_value in [2, 4]:
-            result = "red"       # 🔴 Красное кольцо
-        else:  # 3, 5
-            result = "white"     # ⚪ Белое кольцо
+            result = "red"
+        else:
+            result = "white"
         
         win = False
         bet_type_name = get_darts_bet_name_chat(bet_type)
         
-        # Множители для дартса
         multipliers = {
             "miss": 2.5,
             "red": 1.8,
@@ -1099,7 +990,6 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             "bullseye": 4.3
         }
         
-        # Проверяем выигрыш
         if bet_type in ["мимо", "miss"] and result == "miss":
             win = True
             multiplier = multipliers["miss"]
@@ -1115,7 +1005,6 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         else:
             multiplier = 0
         
-        # Обновляем баланс
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             users_data = load_users_data()
@@ -1123,7 +1012,6 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
             save_users_data(users_data)
             
-            # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -1135,7 +1023,6 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             except Exception as e:
                 logging.error(f"Ошибка записи выигрыша в историю: {e}")
             
-            # НАЧИСЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС
             logging.info(f"🎯 Дартс (чат): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
             
@@ -1152,7 +1039,6 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         else:
             users_data = load_users_data()
             
-            # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -1183,43 +1069,29 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
 
 def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
     try:
-        # Проверяем активную игру пользователя
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
-                return  # Игра уже запущена
+                return
             active_games[user_id] = session_token
 
-        # Показываем анимацию броска
         darts_msg = bot.send_dice(call.message.chat.id, emoji='🎯')
 
-        # Ждем 3 секунды
         time.sleep(3)
 
-        # Получаем результат (значение кости дартса)
         dice_value = darts_msg.dice.value
         users_data = load_users_data()
 
-        # ПРАВИЛЬНАЯ СТРУКТУРА МИШЕНИ ДАРТСА:
-        # Центр (красный) -> Белое кольцо -> Красное кольцо -> Белое кольцо -> Красное кольцо (внешнее)
-        # dice_value:
-        # 1 = мимо доски
-        # 2 = внешнее красное кольцо (самый большой)
-        # 3 = белое кольцо (второе по размеру)
-        # 4 = красное кольцо (третье по размеру)
-        # 5 = белое кольцо (четвертое по размеру)
-        # 6 = центр (красный, самый маленький)
 
         if dice_value == 1:
-            result = "miss"      # ❌ Мимо
+            result = "miss"
         elif dice_value == 6:
-            result = "bullseye"  # 🎯 Центр (красный)
+            result = "bullseye"
         elif dice_value in [2, 4]:
-            result = "red"       # 🔴 Красное кольцо
-        else:  # 3, 5
-            result = "white"     # ⚪ Белое кольцо
+            result = "red"
+        else:
+            result = "white"
 
         win = False
-        # Множители для дартса
         multipliers = {
             "miss": 2.5,
             "red": 1.8,
@@ -1227,7 +1099,6 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
             "bullseye": 4.3
         }
 
-        # Проверяем выигрыш
         if bet_type == "red" and result in ["red", "bullseye"]:
             win = True
             multiplier = multipliers["red"]
@@ -1243,14 +1114,12 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
         else:
             multiplier = 0
 
-        # Обновляем баланс
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             current_balance = users_data[user_id].get('balance', 0)
             users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
             save_users_data(users_data)
             
-            # ЗАПИСЬ ВЫИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -1262,7 +1131,6 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
             except Exception as e:
                 logging.error(f"Ошибка записи выигрыша в историю: {e}")
             
-            # НАЧИСЛЯЕМ РЕФЕРАЛЬНЫЙ БОНУС
             logging.info(f"🎯 Дартс (инлайн): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
 
@@ -1279,7 +1147,6 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
             users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
             save_users_data(users_data)
 
-            # ЗАПИСЬ ПРОИГРЫША В ИСТОРИЮ ДЛЯ ЛИДЕРОВ
             try:
                 add_game_to_history(
                     user_id=int(user_id),
@@ -1301,14 +1168,12 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
 
-        # Отправляем результат новым сообщением
         bot.send_message(
             call.message.chat.id,
             result_text,
             parse_mode='HTML'
         )
 
-        # Очищаем активную игру
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
                 del active_games[user_id]
@@ -1319,7 +1184,6 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
     except Exception as e:
         logging.error(f"Ошибка в игре в дартс: {e}")
-        # Очищаем активную игру при ошибке
         with bet_lock:
             if user_id in active_games:
                 del active_games[user_id]
@@ -1367,17 +1231,14 @@ def get_darts_result_emoji(result):
     }
     return emojis.get(result, result)
 
-# ДОБАВЛЯЕМ ФУНКЦИИ ДЛЯ РЕГИСТРАЦИИ ХЕНДЛЕРОВ
 def process_custom_bet_games(message):
     try:
         user_id = str(message.from_user.id)
 
-        # Проверяем ограничение по времени
         if not rate_limit(user_id):
             bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
             return
 
-        # Проверяем активную игру
         with bet_lock:
             if user_id in active_games:
                 bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -1391,7 +1252,6 @@ def process_custom_bet_games(message):
 
         balance = users_data[user_id].get('balance', 0)
 
-        # Получаем тип игры для проверки минимальной ставки
         with bet_lock:
             if user_id not in active_bets:
                 bot.send_message(message.chat.id, "❌ Сначала выберите игру!")
@@ -1399,7 +1259,6 @@ def process_custom_bet_games(message):
             game_type = active_bets[user_id]['game_type']
             min_bet = get_min_bet(game_type)
 
-        # Проверяем минимальную ставку в зависимости от игры
         if bet_amount < min_bet:
             bot.send_message(message.chat.id, f"❌ Минимальная ставка: {min_bet}₽!")
             return
@@ -1407,15 +1266,12 @@ def process_custom_bet_games(message):
             bot.send_message(message.chat.id, "❌ Недостаточно средств!")
             return
 
-        # Списываем ставку
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
 
-        # Показываем выбор для выбранной игры
         with bet_lock:
             active_bets[user_id]['bet_amount'] = bet_amount
 
-            # Генерируем токен сессии
             session_token = generate_session_token(user_id, game_type)
             game_session_tokens[user_id] = session_token
 
@@ -1462,7 +1318,6 @@ def register_games_handlers(bot_instance):
     global bot
     bot = bot_instance
 
-    # КОМАНДЫ ДЛЯ ЧАТА (КОСТИ) - БЕЗ СЛЭША
     @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['чет', 'even', 'нечет', 'odd', 'больше', 'more', 'high', 'меньше', 'less', 'low']) and not message.text.startswith('/'))
     def dice_no_slash_commands(message):
         try:
@@ -1470,16 +1325,13 @@ def register_games_handlers(bot_instance):
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Парсим текст
             parts = text.split()
             if len(parts) < 2:
                 return
             
-            # Определяем тип ставки
             bet_type_word = parts[0]
             bet_amount_str = parts[1]
             
-            # Маппинг слов на типы ставок
             bet_type_map = {
                 'чет': 'чет', 'even': 'чет',
                 'нечет': 'нечет', 'odd': 'нечет',
@@ -1497,12 +1349,10 @@ def register_games_handlers(bot_instance):
             except ValueError:
                 return
             
-            # Проверяем минимальную ставку для костей
             if bet_amount < MIN_BET_DICE:
                 bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_dice_game_chat,
                 args=(bot, message, bet_type, bet_amount, user_id, username),
@@ -1512,14 +1362,12 @@ def register_games_handlers(bot_instance):
         except Exception as e:
             logging.error(f"Ошибка в dice_no_slash_commands: {e}")
 
-    # КОМАНДЫ ДЛЯ ЧАТА (КОСТИ) - СО СЛЭШЕМ
     @bot.message_handler(commands=['чет', 'even'])
     def dice_even_command(message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Проверяем аргументы
             if len(message.text.split()) < 2:
                 bot.reply_to(message, "❌ Используйте: /чет [сумма] или /even [сумма]")
                 return
@@ -1530,12 +1378,10 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем минимальную ставку для костей
             if bet_amount < MIN_BET_DICE:
                 bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_dice_game_chat,
                 args=(bot, message, "чет", bet_amount, user_id, username),
@@ -1552,7 +1398,6 @@ def register_games_handlers(bot_instance):
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Проверяем аргументы
             if len(message.text.split()) < 2:
                 bot.reply_to(message, "❌ Используйте: /нечет [сумма] или /odd [сумма]")
                 return
@@ -1563,12 +1408,10 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем минимальную ставку для костей
             if bet_amount < MIN_BET_DICE:
                 bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_dice_game_chat,
                 args=(bot, message, "нечет", bet_amount, user_id, username),
@@ -1585,7 +1428,6 @@ def register_games_handlers(bot_instance):
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Проверяем аргументы
             if len(message.text.split()) < 2:
                 bot.reply_to(message, "❌ Используйте: /больше [сумма] или /more [сумма]")
                 return
@@ -1596,12 +1438,10 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем минимальную ставку для костей
             if bet_amount < MIN_BET_DICE:
                 bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_dice_game_chat,
                 args=(bot, message, "больше", bet_amount, user_id, username),
@@ -1618,7 +1458,6 @@ def register_games_handlers(bot_instance):
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Проверяем аргументы
             if len(message.text.split()) < 2:
                 bot.reply_to(message, "❌ Используйте: /меньше [сумма] или /less [сумма]")
                 return
@@ -1629,12 +1468,10 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем минимальную ставку для костей
             if bet_amount < MIN_BET_DICE:
                 bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_dice_game_chat,
                 args=(bot, message, "меньше", bet_amount, user_id, username),
@@ -1645,7 +1482,6 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в dice_low_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    # КОМАНДЫ ДЛЯ ЧАТА (БАСКЕТБОЛ) - БЕЗ СЛЭША
     @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['баскетбол', 'баскет', 'basketball', 'basket']) and not message.text.startswith('/'))
     def basketball_no_slash_commands(message):
         try:
@@ -1653,7 +1489,6 @@ def register_games_handlers(bot_instance):
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Парсим текст
             parts = text.split()
             if len(parts) < 3:
                 bot.reply_to(message, "❌ Используйте: баскетбол [тип] [сумма]\nТипы: мимо, гол, 3-очковый")
@@ -1662,7 +1497,6 @@ def register_games_handlers(bot_instance):
             bet_type_word = parts[1].lower()
             bet_amount_str = parts[2]
             
-            # Маппинг слов на типы ставок
             bet_type_map = {
                 'мимо': 'мимо', 'miss': 'мимо',
                 'гол': 'гол', 'goal': 'гол',
@@ -1681,12 +1515,10 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем минимальную ставку для баскетбола
             if bet_amount < MIN_BET_OTHER:
                 bot.reply_to(message, f"❌ Минимальная ставка для баскетбола: {MIN_BET_OTHER}₽!")
                 return
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_basketball_game_chat,
                 args=(bot, message, bet_type, bet_amount, user_id, username),
@@ -1697,14 +1529,12 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в basketball_no_slash_commands: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    # КОМАНДЫ ДЛЯ ЧАТА (БАСКЕТБОЛ) - СО СЛЭШЕМ
     @bot.message_handler(commands=['баскетбол', 'basketball'])
     def basketball_command(message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Проверяем аргументы
             if len(message.text.split()) < 3:
                 bot.reply_to(message, "❌ Используйте: /баскетбол [тип] [сумма]\nТипы: мимо, гол, 3-очковый")
                 return
@@ -1716,17 +1546,14 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем тип ставки
             if bet_type not in ["мимо", "гол", "3-очковый", "miss", "goal", "three"]:
                 bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, гол, 3-очковый")
                 return
             
-            # Проверяем минимальную ставку для баскетбола
             if bet_amount < MIN_BET_OTHER:
                 bot.reply_to(message, f"❌ Минимальная ставка для баскетбола: {MIN_BET_OTHER}₽!")
                 return
             
-            # Нормализуем тип ставки
             if bet_type in ["miss"]:
                 bet_type = "мимо"
             elif bet_type in ["goal"]:
@@ -1734,7 +1561,6 @@ def register_games_handlers(bot_instance):
             elif bet_type in ["three"]:
                 bet_type = "3-очковый"
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_basketball_game_chat,
                 args=(bot, message, bet_type, bet_amount, user_id, username),
@@ -1745,7 +1571,6 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в basketball_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    # КОМАНДЫ ДЛЯ ЧАТА (ФУТБОЛ) - БЕЗ СЛЭША
     @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['футбол', 'фут', 'football', 'foot']) and not message.text.startswith('/'))
     def football_no_slash_commands(message):
         try:
@@ -1753,7 +1578,6 @@ def register_games_handlers(bot_instance):
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Парсим текст
             parts = text.split()
             if len(parts) < 3:
                 bot.reply_to(message, "❌ Используйте: футбол [тип] [сумма]\nТипы: мимо, гол")
@@ -1762,7 +1586,6 @@ def register_games_handlers(bot_instance):
             bet_type_word = parts[1].lower()
             bet_amount_str = parts[2]
             
-            # Маппинг слов на типы ставок
             bet_type_map = {
                 'мимо': 'мимо', 'miss': 'мимо',
                 'гол': 'гол', 'goal': 'гол'
@@ -1780,12 +1603,10 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем минимальную ставку для футбола
             if bet_amount < MIN_BET_OTHER:
                 bot.reply_to(message, f"❌ Минимальная ставка для футбола: {MIN_BET_OTHER}₽!")
                 return
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_football_game_chat,
                 args=(bot, message, bet_type, bet_amount, user_id, username),
@@ -1796,14 +1617,12 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в football_no_slash_commands: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    # КОМАНДЫ ДЛЯ ЧАТА (ФУТБОЛ) - СО СЛЭШЕМ
     @bot.message_handler(commands=['футбол', 'football'])
     def football_command(message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Проверяем аргументы
             if len(message.text.split()) < 3:
                 bot.reply_to(message, "❌ Используйте: /футбол [тип] [сумма]\nТипы: мимо, гол")
                 return
@@ -1815,23 +1634,19 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем тип ставки
             if bet_type not in ["мимо", "гол", "miss", "goal"]:
                 bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, гол")
                 return
             
-            # Проверяем минимальную ставку для футбола
             if bet_amount < MIN_BET_OTHER:
                 bot.reply_to(message, f"❌ Минимальная ставка для футбола: {MIN_BET_OTHER}₽!")
                 return
             
-            # Нормализуем тип ставки
             if bet_type in ["miss"]:
                 bet_type = "мимо"
             elif bet_type in ["goal"]:
                 bet_type = "гол"
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_football_game_chat,
                 args=(bot, message, bet_type, bet_amount, user_id, username),
@@ -1842,7 +1657,6 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в football_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    # КОМАНДЫ ДЛЯ ЧАТА (ДАРТС) - БЕЗ СЛЭША
     @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['дартс', 'дарт', 'darts', 'dart']) and not message.text.startswith('/'))
     def darts_no_slash_commands(message):
         try:
@@ -1850,7 +1664,6 @@ def register_games_handlers(bot_instance):
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Парсим текст
             parts = text.split()
             if len(parts) < 3:
                 bot.reply_to(message, "❌ Используйте: дартс [тип] [сумма]\nТипы: мимо, красное, белое, центр")
@@ -1859,7 +1672,6 @@ def register_games_handlers(bot_instance):
             bet_type_word = parts[1].lower()
             bet_amount_str = parts[2]
             
-            # Маппинг слов на типы ставок
             bet_type_map = {
                 'мимо': 'мимо', 'miss': 'мимо',
                 'красное': 'красное', 'red': 'красное', 'красный': 'красное',
@@ -1879,12 +1691,10 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем минимальную ставку для дартса
             if bet_amount < MIN_BET_OTHER:
                 bot.reply_to(message, f"❌ Минимальная ставка для дартса: {MIN_BET_OTHER}₽!")
                 return
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_darts_game_chat,
                 args=(bot, message, bet_type, bet_amount, user_id, username),
@@ -1895,14 +1705,12 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в darts_no_slash_commands: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    # КОМАНДЫ ДЛЯ ЧАТА (ДАРТС) - СО СЛЭШЕМ
     @bot.message_handler(commands=['дартс', 'darts'])
     def darts_command(message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
-            # Проверяем аргументы
             if len(message.text.split()) < 3:
                 bot.reply_to(message, "❌ Используйте: /дартс [тип] [сумма]\nТипы: мимо, красное, белое, центр")
                 return
@@ -1914,18 +1722,15 @@ def register_games_handlers(bot_instance):
                 bot.reply_to(message, "❌ Введите корректную сумму!")
                 return
             
-            # Проверяем тип ставки
             valid_types = ["мимо", "красное", "белое", "центр", "miss", "red", "white", "bullseye"]
             if bet_type not in valid_types:
                 bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, красное, белое, центр")
                 return
             
-            # Проверяем минимальную ставку для дартса
             if bet_amount < MIN_BET_OTHER:
                 bot.reply_to(message, f"❌ Минимальная ставка для дартса: {MIN_BET_OTHER}₽!")
                 return
             
-            # Нормализуем тип ставки
             type_map = {
                 "miss": "мимо",
                 "red": "красное",
@@ -1935,7 +1740,6 @@ def register_games_handlers(bot_instance):
             if bet_type in type_map:
                 bet_type = type_map[bet_type]
             
-            # Запускаем игру в отдельном потоке
             threading.Thread(
                 target=play_darts_game_chat,
                 args=(bot, message, bet_type, bet_amount, user_id, username),
@@ -1946,18 +1750,15 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в darts_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    # ДОБАВЛЕН: Обработчик для нажатия на кнопки игр из инлайн-меню
     @bot.callback_query_handler(func=lambda call: call.data in ["games_dice", "games_basketball", "games_football", "games_darts"])
     def handle_game_selection(call):
         try:
             user_id = str(call.from_user.id)
 
-            # Проверяем ограничение по времени
             if not rate_limit(user_id):
                 bot.answer_callback_query(call.id, "❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
                 return
 
-            # Проверяем активную игру
             with bet_lock:
                 if user_id in active_games:
                     bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
@@ -1972,7 +1773,6 @@ def register_games_handlers(bot_instance):
             balance = users_data[user_id].get('balance', 0)
             balance_rounded = round(balance, 2)
 
-            # Определяем тип игры
             game_types = {
                 "games_dice": ("🎲 Кости", "dice"),
                 "games_basketball": ("🏀 Баскетбол", "basketball"),
@@ -2009,12 +1809,10 @@ def register_games_handlers(bot_instance):
         try:
             user_id = str(message.from_user.id)
 
-            # Проверяем ограничение по времени
             if not rate_limit(user_id):
                 bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
                 return
 
-            # Проверяем активную игру
             with bet_lock:
                 if user_id in active_games:
                     bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
@@ -2062,12 +1860,10 @@ def register_games_handlers(bot_instance):
         try:
             user_id = str(call.from_user.id)
 
-            # Проверяем ограничение по времени
             if not rate_limit(user_id):
                 bot.answer_callback_query(call.id, "❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
                 return
 
-            # Проверяем активную игру
             with bet_lock:
                 if user_id in active_games:
                     bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
@@ -2083,7 +1879,6 @@ def register_games_handlers(bot_instance):
                     bot.answer_callback_query(call.id, "❌ Недостаточно средств!")
                     return
 
-                # Сохраняем сумму ставку
                 with bet_lock:
                     if user_id not in active_bets:
                         bot.answer_callback_query(call.id, "❌ Сначала выберите игру!", show_alert=True)
@@ -2092,11 +1887,9 @@ def register_games_handlers(bot_instance):
                     active_bets[user_id]['bet_amount'] = bet_amount
                     game_type = active_bets[user_id]['game_type']
 
-                # Списываем ставку
                 users_data[user_id]['balance'] = round(balance - bet_amount, 2)
                 save_users_data(users_data)
 
-                # Генерируем токен сессии
                 session_token = generate_session_token(user_id, game_type)
                 with bet_lock:
                     game_session_tokens[user_id] = session_token
@@ -2172,13 +1965,11 @@ def register_games_handlers(bot_instance):
             except:
                 pass
 
-    # ОБРАБОТЧИКИ ДЛЯ ВЫБОРА РЕЖИМОВ В ИГРАХ
     @bot.callback_query_handler(func=lambda call: call.data.startswith(('dice_', 'basketball_', 'football_', 'darts_')))
     def games_mode_callback_handler(call):
         try:
             user_id = str(call.from_user.id)
 
-            # Проверяем ограничение по времени
             if not rate_limit(user_id):
                 bot.answer_callback_query(call.id, "❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
                 return
@@ -2196,7 +1987,6 @@ def register_games_handlers(bot_instance):
                 game_type = active_bets[user_id]['game_type']
                 session_token = game_session_tokens.get(user_id, generate_session_token(user_id, game_type))
 
-            # Обработка выбора в играх
             if call.data.startswith("dice_"):
                 bet_type = call.data.split("_")[1]
                 threading.Thread(
@@ -2229,7 +2019,6 @@ def register_games_handlers(bot_instance):
                     daemon=True
                 ).start()
 
-            # Показываем загрузку
             bot.answer_callback_query(call.id, "🎮 Запускаем игру...")
 
         except Exception as e:
