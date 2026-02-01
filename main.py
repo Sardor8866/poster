@@ -789,6 +789,10 @@ def games_mines_tower_handler(call):
             except Exception as e:
                 print(f"Ошибка запуска игры Мины: {e}")
                 bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+        
+        except Exception as e:
+            print(f"Общая ошибка в обработке Мины: {e}")
+            bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
     
     elif call.data == "games_tower":
         try:
@@ -812,6 +816,10 @@ def games_mines_tower_handler(call):
             except Exception as e:
                 print(f"Ошибка запуска игры Башня: {e}")
                 bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+        
+        except Exception as e:
+            print(f"Общая ошибка в обработке Башни: {e}")
+            bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
 
 @bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw", "profile_deposit", "profile_withdraw"])
 def payment_callback_handler(call):
@@ -881,3 +889,4 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
+
