@@ -777,7 +777,7 @@ def games_mines_tower_handler(call):
             
             # Запускаем игру Мины
             try:
-                from mines import mines_start
+                
                 # Создаем fake message для передачи в mines_start
                 fake_message = type('obj', (object,), {
                     'chat': type('obj', (object,), {'id': call.message.chat.id}),
@@ -785,7 +785,7 @@ def games_mines_tower_handler(call):
                     'message_id': call.message.message_id,
                     'text': "💣 Мины"
                 })()
-                mines_start(fake_message)
+                mines.mines_start(fake_message)
             except Exception as e:
                 print(f"Ошибка запуска игры Мины: {e}")
                 bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
@@ -804,7 +804,7 @@ def games_mines_tower_handler(call):
             
             # Запускаем игру Башня
             try:
-                from tower import tower_start
+                
                 # Создаем fake message для передачи в tower_start
                 fake_message = type('obj', (object,), {
                     'chat': type('obj', (object,), {'id': call.message.chat.id}),
@@ -812,7 +812,7 @@ def games_mines_tower_handler(call):
                     'message_id': call.message.message_id,
                     'text': "🏰 Башня"
                 })()
-                tower_start(fake_message)
+                tower.tower_start(fake_message)
             except Exception as e:
                 print(f"Ошибка запуска игры Башня: {e}")
                 bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
@@ -889,4 +889,3 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
-
