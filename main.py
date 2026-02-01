@@ -384,7 +384,7 @@ def start_message(message):
 
     print(f"=== ЗАВЕРШЕНО ОБРАБОТКА /start ===\n")
 
-@bot.message_handler(func=lambda message: message.text and message.text.strip().lower() in ['баланс', '/баланс', 'balance', '/balance', 'бал', '/бал'])
+@bot.message_handler(commands=['бал', 'баланс', 'balance'])
 def balance_command(message):
     users_data = load_users_data()
     user_id = str(message.from_user.id)
@@ -826,6 +826,30 @@ Flame Game - это современная игровая
             parse_mode='HTML',
             reply_markup=markup
         )
+
+    elif text.strip().lower() in ['бал', 'баланс', 'balance']:
+        if user_id in users_data:
+            user_info = users_data[user_id]
+            balance = user_info.get('balance', 0)
+            balance_rounded = round(balance, 2)
+
+            if user.username:
+                user_display = f"@{user.username}"
+            else:
+                user_display = user.first_name
+
+            balance_text = f"""
+👤 <b>{user_display}</b>
+💰 <b>Баланс:</b> {balance_rounded}₽
+"""
+            bot.send_message(
+                message.chat.id,
+                balance_text,
+                parse_mode='HTML',
+                reply_to_message_id=message.message_id
+            )
+        else:
+            bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
 
     else:
         bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
