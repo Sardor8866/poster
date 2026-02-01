@@ -1855,7 +1855,7 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в games_start: {e}")
             bot.send_message(message.chat.id, "❌ Произошла ошибка при запуске игры!")
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('games_'))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('games_') and call.data not in ['games_mines', 'games_tower'])
     def games_callback_handler(call):
         try:
             user_id = str(call.from_user.id)
@@ -2027,5 +2027,3 @@ def register_games_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
             except:
                 pass
-
-   
