@@ -4,11 +4,34 @@ import json
 from datetime import datetime
 import re
 import os
-from flask import Flask, request
+from flask import Flask, request, abort
+import threading
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ИСПРАВЛЕНИЕ: Добавляем блокировки для безопасной работы с файлами
+file_lock = threading.Lock()
+user_locks = {}
+
+def get_user_lock(user_id):
+    """Получение блокировки для конкретного пользователя"""
+    if user_id not in user_locks:
+        user_locks[user_id] = threading.Lock()
+    return user_locks[user_id]
+
+def validate_amount(amount, min_amount=0, max_amount=1000000):
+    """Валидация суммы"""
+    try:
+        amount = float(amount)
+        if amount < min_amount or amount > max_amount:
+            return None
+        if amount != amount:  # проверка на NaN
+            return None
+        return round(amount, 2)
+    except:
+        return None
 
 from leaders import register_leaders_handlers, leaders_start
 import mines
@@ -119,14 +142,26 @@ else:
 
 def load_users_data():
     try:
-        with open('users_data.json', 'r') as f:
-            return json.load(f)
+        # ИСПРАВЛЕНИЕ: Используем блокировку при чтении
+        with file_lock:
+            with open('users_data.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
     except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        logger.error("Ошибка декодирования JSON")
         return {}
 
 def save_users_data(data):
-    with open('users_data.json', 'w') as f:
-        json.dump(data, f, indent=2)
+    try:
+        # ИСПРАВЛЕНИЕ: Используем блокировку при записи
+        with file_lock:
+            with open('users_data.json', 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения данных: {e}")
+        return False
 
 def get_user_avatar(user_id):
     try:
@@ -150,6 +185,10 @@ def games_inline_menu(user_id):
     users_data = load_users_data()
     user_info = users_data.get(user_id, {})
     balance = user_info.get('balance', 0)
+    # ИСПРАВЛЕНИЕ: Валидация баланса
+    balance = validate_amount(balance, min_amount=0)
+    if balance is None:
+        balance = 0
     balance_rounded = round(balance, 2)
 
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -236,36 +275,46 @@ def start_message(message):
                 error_msg = result.get('message', 'Неизвестная ошибка') if result else 'Ошибка обработки'
                 print(f"Не удалось обработать реферала {user_id}: {error_msg}")
 
-                users_data[user_id] = user_data
-                users_data[user_id]['referrer_id'] = None
-                users_data[user_id]['is_referral'] = False
-                save_users_data(users_data)
-                print(f"Создан обычный пользователь {user_id}")
+                # ИСПРАВЛЕНИЕ: Используем блокировку при создании пользователя
+                user_lock = get_user_lock(user_id)
+                with user_lock:
+                    users_data = load_users_data()
+                    if user_id not in users_data:
+                        users_data[user_id] = user_data
+                        users_data[user_id]['referrer_id'] = None
+                        users_data[user_id]['is_referral'] = False
+                        save_users_data(users_data)
+                        print(f"Создан обычный пользователь {user_id}")
         else:
             print(f"Существующий пользователь {user_id} не может стать рефералом")
     else:
         if is_new_user:
-            users_data[user_id] = {
-                'first_seen': datetime.now().isoformat(),
-                'balance': 0,
-                'level': 1,
-                'referrals': [],
-                'referral_bonus': 0,
-                'total_referral_income': 0,
-                'referral_code': user_id[-6:].upper(),
-                'referrer_id': None,
-                'is_referral': False,
-                'username': message.from_user.username,
-                'first_name': message.from_user.first_name,
-                'total_deposits': 0,
-                'total_withdrawals': 0,
-                'games_played': 0,
-                'games_won': 0,
-                'total_wagered': 0,
-                'referral_notifications_sent': []
-            }
-            save_users_data(users_data)
-            print(f"Создан обычный пользователь {user_id} без реферала")
+            # ИСПРАВЛЕНИЕ: Используем блокировку при создании пользователя
+            user_lock = get_user_lock(user_id)
+            with user_lock:
+                users_data = load_users_data()
+                if user_id not in users_data:
+                    users_data[user_id] = {
+                        'first_seen': datetime.now().isoformat(),
+                        'balance': 0,
+                        'level': 1,
+                        'referrals': [],
+                        'referral_bonus': 0,
+                        'total_referral_income': 0,
+                        'referral_code': user_id[-6:].upper(),
+                        'referrer_id': None,
+                        'is_referral': False,
+                        'username': message.from_user.username,
+                        'first_name': message.from_user.first_name,
+                        'total_deposits': 0,
+                        'total_withdrawals': 0,
+                        'games_played': 0,
+                        'games_won': 0,
+                        'total_wagered': 0,
+                        'referral_notifications_sent': []
+                    }
+                    save_users_data(users_data)
+                    print(f"Создан обычный пользователь {user_id} без реферала")
 
     users_data = load_users_data()
 
@@ -389,6 +438,10 @@ def balance_command(message):
 
     user_info = users_data[user_id]
     balance = user_info.get('balance', 0)
+    # ИСПРАВЛЕНИЕ: Валидация баланса
+    balance = validate_amount(balance, min_amount=0)
+    if balance is None:
+        balance = 0
     balance_rounded = round(balance, 2)
 
     username = message.from_user.username
@@ -531,6 +584,16 @@ def pay_command(message):
             raise ValueError
 
         amount = float(numbers[0])
+        
+        # ИСПРАВЛЕНИЕ: Валидация суммы
+        amount = validate_amount(amount, min_amount=1, max_amount=1000)
+        if amount is None:
+            bot.send_message(
+                message.chat.id,
+                "❌ Некорректная сумма!",
+                reply_to_message_id=message.message_id
+            )
+            return
 
         if amount < 1:
             bot.send_message(
@@ -548,19 +611,30 @@ def pay_command(message):
             )
             return
 
-        sender_balance = users_data[sender_id].get('balance', 0)
-        if sender_balance < amount:
-            bot.send_message(
-                message.chat.id,
-                f"❌ Недостаточно средств!",
-                reply_to_message_id=message.message_id
-            )
-            return
+        # ИСПРАВЛЕНИЕ: Используем блокировки для обоих пользователей
+        sender_lock = get_user_lock(sender_id)
+        recipient_lock = get_user_lock(recipient_id)
+        
+        # Блокируем в порядке ID чтобы избежать deadlock
+        locks = sorted([sender_lock, recipient_lock], key=lambda x: id(x))
+        
+        with locks[0]:
+            with locks[1]:
+                users_data = load_users_data()
+                
+                        sender_balance = users_data[sender_id].get('balance', 0)
+                if sender_balance < amount:
+                    bot.send_message(
+                        message.chat.id,
+                        f"❌ Недостаточно средств!",
+                        reply_to_message_id=message.message_id
+                    )
+                    return
 
-        users_data[sender_id]['balance'] = round(sender_balance - amount, 2)
-        users_data[recipient_id]['balance'] = round(users_data[recipient_id].get('balance', 0) + amount, 2)
+                users_data[sender_id]['balance'] = round(sender_balance - amount, 2)
+                users_data[recipient_id]['balance'] = round(users_data[recipient_id].get('balance', 0) + amount, 2)
 
-        save_users_data(users_data)
+                save_users_data(users_data)
 
         recipient_name = recipient.username or recipient.first_name
 
