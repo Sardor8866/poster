@@ -116,7 +116,7 @@ tower_lock = threading.Lock()
 processing_actions_tower = {}
 processing_lock_tower = threading.Lock()
 
-MIN_BET = 25
+MIN_BET = 10
 MAX_BET = float('inf')
 
 GAME_TIMEOUT = 300
@@ -645,7 +645,7 @@ def register_tower_handlers(bot_instance):
 <b>⚙️ Параметры:</b>
 • Мин на этаж: от 1 до 4
 • Этажей: 6
-• Минимальная ставка: 25₽
+• Минимальная ставка: 10₽
 • Игра автоматически закрывается через 5 минут бездействия (ставка возвращается)
 </blockquote>"""
             bot.send_message(message.chat.id, help_text, parse_mode='HTML')
@@ -962,7 +962,7 @@ def register_tower_handlers(bot_instance):
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
-Введите сумму ставки (мин. 25₽):
+Введите сумму ставки (мин. 10₽):
 </blockquote>""",
                         parse_mode='HTML'
                     )
