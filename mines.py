@@ -1228,11 +1228,6 @@ def register_mines_handlers(bot_instance):
                     
                     game.game_active = False
                     
-                    # Сразу удаляем игру из активных
-                    with mines_lock:
-                        if user_id in active_games and active_games[user_id].session_token == game.session_token:
-                            del active_games[user_id]
-                    
                     win_amount = game.bet_amount * game.multiplier
                     
                     users_data = load_users_data()
@@ -1255,6 +1250,7 @@ def register_mines_handlers(bot_instance):
                         daemon=True
                     ).start()
 
+                    # Сначала обновляем клавиатуру
                     try:
                         bot.edit_message_text(
                             format_game_result(game, win_amount, True),
@@ -1266,6 +1262,11 @@ def register_mines_handlers(bot_instance):
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logging.error(f"Ошибка edit_message_text mine_cashout: {e}")
+                    
+                    # Потом удаляем игру
+                    with mines_lock:
+                        if user_id in active_games and active_games[user_id].session_token == game.session_token:
+                            del active_games[user_id]
                     
                     clear_action_processing(user_id, action_key)
                     return
