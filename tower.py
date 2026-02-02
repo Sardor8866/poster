@@ -169,7 +169,7 @@ def save_users_data(data):
 active_tower_games = {}
 user_temp_data_tower = {}
 last_click_time_tower = {}
-tower_lock = threading.Lock()
+tower_lock = threading.RLock()  # Используем RLock для рекурсивных блокировок
 processing_actions_tower = {}
 processing_lock_tower = threading.Lock()
 
@@ -183,13 +183,14 @@ def cleanup_inactive_tower_games():
     current_time = time.time()
     games_to_remove = []
     
+    # Быстро собираем игры для удаления
     with tower_lock:
         for user_id, game in list(active_tower_games.items()):
             if current_time - game.created_time > GAME_TIMEOUT:
-                logging.info(f"Удаление неактивной игры Башня пользователя {user_id}, созданной {current_time - game.created_time:.1f} секунд назад")
-                games_to_remove.append((user_id, game))
+                games_to_remove.append((user_id, game.session_token, game))
     
-    for user_id, game in games_to_remove:
+    # Обрабатываем удаление вне основной блокировки
+    for user_id, session_token, game in games_to_remove:
         try:
             users_data = load_users_data()
             if user_id in users_data:
@@ -227,10 +228,12 @@ def cleanup_inactive_tower_games():
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения игры Башня {user_id}: {e}")
             
+            # Удаляем игру только если она всё ещё существует с тем же токеном
             with tower_lock:
-                if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
+                if user_id in active_tower_games and active_tower_games[user_id].session_token == session_token:
                     del active_tower_games[user_id]
             
+            # Очищаем временные данные
             with tower_lock:
                 if user_id in user_temp_data_tower:
                     del user_temp_data_tower[user_id]
@@ -239,6 +242,7 @@ def cleanup_inactive_tower_games():
                 if user_id in last_click_time_tower:
                     del last_click_time_tower[user_id]
             
+            # Очищаем обработку действий
             with processing_lock_tower:
                 keys_to_remove = [k for k in processing_actions_tower.keys() if k.startswith(f"{user_id}_")]
                 for k in keys_to_remove:
@@ -1162,16 +1166,19 @@ def register_tower_handlers(bot_instance):
                 return
 
             elif call.data.startswith("tower_climb_"):
+                # Получаем игру без долгой блокировки
+                game = None
                 with tower_lock:
-                    if user_id not in active_tower_games:
-                        try:
-                            bot.answer_callback_query(call.id, "❌ Игра не найдена")
-                        except:
-                            pass
-                        clear_action_processing_tower(user_id, action_key)
-                        return
+                    if user_id in active_tower_games:
+                        game = active_tower_games[user_id]
 
-                    game = active_tower_games[user_id]
+                if not game:
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Игра не найдена")
+                    except:
+                        pass
+                    clear_action_processing_tower(user_id, action_key)
+                    return
 
                 if not game.game_active:
                     try:
@@ -1186,6 +1193,7 @@ def register_tower_handlers(bot_instance):
                 floor_num = int(parts[2])
                 cell_num = int(parts[3])
 
+                # Быстрая проверка времени
                 with game.action_lock:
                     current_time = time.time()
                     if current_time - game.last_action_time < 0.4:
@@ -1237,7 +1245,7 @@ def register_tower_handlers(bot_instance):
                             logging.error(f"Ошибка записи проигрыша в историю: {e}")
 
                         with tower_lock:
-                            if user_id in active_tower_games:
+                            if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
                                 del active_tower_games[user_id]
 
                         try:
@@ -1271,16 +1279,19 @@ def register_tower_handlers(bot_instance):
                         return
 
             elif call.data == "tower_cashout":
+                # Получаем игру без долгой блокировки
+                game = None
                 with tower_lock:
-                    if user_id not in active_tower_games:
-                        try:
-                            bot.answer_callback_query(call.id, "❌ Игра не найдена")
-                        except:
-                            pass
-                        clear_action_processing_tower(user_id, action_key)
-                        return
+                    if user_id in active_tower_games:
+                        game = active_tower_games[user_id]
 
-                    game = active_tower_games[user_id]
+                if not game:
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Игра не найдена")
+                    except:
+                        pass
+                    clear_action_processing_tower(user_id, action_key)
+                    return
 
                 if not game.game_active:
                     try:
@@ -1325,7 +1336,7 @@ def register_tower_handlers(bot_instance):
                     ).start()
 
                     with tower_lock:
-                        if user_id in active_tower_games:
+                        if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
                             del active_tower_games[user_id]
 
                     try:
