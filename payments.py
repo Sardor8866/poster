@@ -20,6 +20,15 @@ except ImportError:
 CRYPTOBOT_TOKEN = "477733:AAzooy5vcnCpJuGgTZc1Rdfbu71bqmrRMgr"
 ADMIN_ID = "8118184388"
 
+# ======= НАСТРОЙКА ID ГРУППЫ ДЛЯ УВЕДОМЛЕНИЙ =======
+# Замените -1001234567890 на ID вашей группы
+NOTIFICATION_GROUP_ID = "-1001234567890"  # ← УКАЖИТЕ ЗДЕСЬ ID ВАШЕЙ ГРУППЫ
+# ===================================================
+
+# URL изображений для уведомлений
+WITHDRAW_IMAGE_URL = "https://i.ibb.co/5WP3qHWz/withdraw.jpg"  # Изображение для вывода
+DEPOSIT_IMAGE_URL = "https://i.ibb.co/F4v9vLRK/deposit.jpg"   # Изображение для пополнения
+
 MIN_DEPOSIT_RUB = 50
 MIN_WITHDRAW_RUB = 300
 MAX_DEPOSIT_RUB = 500000
@@ -228,6 +237,55 @@ def add_transaction(user_id, amount, transaction_type, status="completed", crypt
     except Exception as e:
         logging.error(f"Ошибка в add_transaction: {e}")
         return False
+
+def send_notification_to_group(bot, transaction_type, username, amount_rub):
+    """
+    Отправляет уведомление в групповой чат с изображением
+    
+    Args:
+        bot: экземпляр TeleBot
+        transaction_type: 'deposit' или 'withdraw'
+        username: имя пользователя
+        amount_rub: сумма в рублях
+    """
+    try:
+        # Работает только для реальной казны
+        if TREASURY_MODE != "real":
+            logging.info(f"Уведомления отключены для тестового режима")
+            return
+        
+        if transaction_type == "deposit":
+            image_url = DEPOSIT_IMAGE_URL
+            emoji = "💰"
+            action = "ПОПОЛНЕНИЕ"
+        elif transaction_type == "withdraw":
+            image_url = WITHDRAW_IMAGE_URL
+            emoji = "💸"
+            action = "ВЫВОД"
+        else:
+            logging.error(f"Неизвестный тип транзакции: {transaction_type}")
+            return
+        
+        # Формируем текст сообщения
+        message_text = f"""
+{emoji} <b>УСПЕШНЫЙ {action}</b>
+
+👤 Пользователь: @{username}
+💵 Сумма: {amount_rub:.2f} ₽
+"""
+        
+        # Отправляем фото с текстом в группу
+        bot.send_photo(
+            chat_id=NOTIFICATION_GROUP_ID,
+            photo=image_url,
+            caption=message_text,
+            parse_mode='HTML'
+        )
+        
+        logging.info(f"✅ Уведомление о {action} отправлено в группу")
+        
+    except Exception as e:
+        logging.error(f"❌ Ошибка отправки уведомления в группу: {e}")
 
 def get_exchange_rate():
     """Получает актуальный курс USD/RUB"""
@@ -1509,6 +1567,21 @@ def register_crypto_handlers(bot):
 
                         add_transaction(user_id, amount_rub, 'deposit', 'completed', crypto_type)
 
+                        # ====== ОТПРАВКА УВЕДОМЛЕНИЯ В ГРУППУ ======
+                        try:
+                            # Получаем username пользователя
+                            from telebot.apihelper import ApiTelegramException
+                            try:
+                                user_info = bot.get_chat(user_id)
+                                username = user_info.username or user_info.first_name or "Пользователь"
+                            except:
+                                username = "Пользователь"
+                            
+                            send_notification_to_group(bot, "deposit", username, amount_rub)
+                        except Exception as notify_error:
+                            logging.error(f"Ошибка отправки уведомления: {notify_error}")
+                        # ===========================================
+
                         success_display = f"""
 <blockquote expandable>╔══════════════════════╗
    ✅ <b>ОПЛАТА ПРОШЛА УСПЕШНО</b> ✅
@@ -1750,6 +1823,14 @@ def register_crypto_handlers(bot):
                     reply_markup=markup
                 )
 
+                # ====== ОТПРАВКА УВЕДОМЛЕНИЯ В ГРУППУ ПОСЛЕ ВЫДАЧИ ЧЕКА ======
+                try:
+                    username = call.from_user.username or call.from_user.first_name or "Пользователь"
+                    send_notification_to_group(bot, "withdraw", username, amount_rub)
+                except Exception as notify_error:
+                    logging.error(f"Ошибка отправки уведомления: {notify_error}")
+                # ==============================================================
+
             else:
                 bot.answer_callback_query(call.id, "⏳ Создаем заявку на вывод...")
 
@@ -1913,6 +1994,14 @@ def register_crypto_handlers(bot):
                         parse_mode='HTML',
                         reply_markup=markup
                     )
+
+                    # ====== ОТПРАВКА УВЕДОМЛЕНИЯ В ГРУППУ ПОСЛЕ ВЫДАЧИ ЧЕКА ======
+                    try:
+                        username = message.from_user.username or message.from_user.first_name or "Пользователь"
+                        send_notification_to_group(bot, "withdraw", username, amount_rub)
+                    except Exception as notify_error:
+                        logging.error(f"Ошибка отправки уведомления: {notify_error}")
+                    # ==============================================================
 
                 else:
                     bot.send_message(message.chat.id, "⏳ Создаем заявку на вывод...")
