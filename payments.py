@@ -23,8 +23,8 @@ ADMIN_ID = "8118184388"
 
 NOTIFICATION_GROUP_ID = "-1003647626166"  
 
-WITHDRAW_IMAGE_URL = "https://i.ibb.co/5WP3qHWz/withdraw.jpg"  # Изображение для вывода
-DEPOSIT_IMAGE_URL = "https://i.ibb.co/F4v9vLRK/deposit.jpg"   # Изображение для пополнения
+WITHDRAW_IMAGE_URL = "https://iimg.su/i/2GviVX" 
+DEPOSIT_IMAGE_URL = "https://iimg.su/i/3yvm27"   
 
 MIN_DEPOSIT_RUB = 50
 MIN_WITHDRAW_RUB = 300
@@ -253,11 +253,11 @@ def send_notification_to_group(bot, transaction_type, username, amount_rub):
         
         if transaction_type == "deposit":
             image_url = DEPOSIT_IMAGE_URL
-            emoji = "💰"
+            emoji = "✅"
             action = "ПОПОЛНЕНИЕ"
         elif transaction_type == "withdraw":
             image_url = WITHDRAW_IMAGE_URL
-            emoji = "💸"
+            emoji = "✅"
             action = "ВЫВОД"
         else:
             logging.error(f"Неизвестный тип транзакции: {transaction_type}")
@@ -267,8 +267,8 @@ def send_notification_to_group(bot, transaction_type, username, amount_rub):
         message_text = f"""
 {emoji} <b>УСПЕШНЫЙ {action}</b>
 
-👤 Пользователь: @{username}
-💵 Сумма: {amount_rub:.2f} ₽
+👤Игрок: @{username}
+💸Сумма: {amount_rub:.2f} ₽
 """
         
         # Отправляем фото с текстом в группу
