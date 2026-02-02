@@ -622,7 +622,7 @@ def pay_command(message):
             with locks[1]:
                 users_data = load_users_data()
                 
-                        sender_balance = users_data[sender_id].get('balance', 0)
+            sender_balance = users_data[sender_id].get('balance', 0)
                 if sender_balance < amount:
                     bot.send_message(
                         message.chat.id,
@@ -1000,3 +1000,4 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
+
