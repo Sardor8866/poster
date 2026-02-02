@@ -1315,6 +1315,11 @@ def register_tower_handlers(bot_instance):
                     
                     game.game_active = False
                     
+                    # Сразу удаляем игру из активных
+                    with tower_lock:
+                        if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
+                            del active_tower_games[user_id]
+                    
                     win_amount = game.bet_amount * game.get_current_multiplier()
                     users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + win_amount, 2)
                     save_users_data(users_data)
@@ -1334,10 +1339,6 @@ def register_tower_handlers(bot_instance):
                         target=lambda: referrals.add_referral_bonus(user_id, win_amount),
                         daemon=True
                     ).start()
-
-                    with tower_lock:
-                        if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
-                            del active_tower_games[user_id]
 
                     try:
                         bot.edit_message_text(
