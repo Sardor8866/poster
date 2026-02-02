@@ -1318,12 +1318,6 @@ def register_tower_handlers(bot_instance):
                     win_amount = game.bet_amount * game.get_current_multiplier()
                     users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + win_amount, 2)
                     save_users_data(users_data)
-                    
-                    # Уведомляем пользователя
-                    try:
-                        bot.answer_callback_query(call.id, f"✅ Выигрыш {round(win_amount, 2)}₽ зачислен!")
-                    except:
-                        pass
 
                     try:
                         add_game_to_history(
@@ -1341,9 +1335,11 @@ def register_tower_handlers(bot_instance):
                         daemon=True
                     ).start()
 
-                    # Сначала обновляем клавиатуру
+                    with tower_lock:
+                        if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
+                            del active_tower_games[user_id]
+
                     try:
-                        logging.info(f"Обновление сообщения для cashout: user={user_id}, chat={call.message.chat.id}, msg={call.message.message_id}")
                         bot.edit_message_text(
                             format_tower_result(game, win_amount, True),
                             call.message.chat.id,
@@ -1351,28 +1347,19 @@ def register_tower_handlers(bot_instance):
                             parse_mode='HTML',
                             reply_markup=get_tower_keyboard(game, show_all=True)
                         )
-                        logging.info(f"Сообщение успешно обновлено для user={user_id}")
                     except Exception as e:
-                        logging.error(f"КРИТИЧЕСКАЯ ОШИБКА edit_message_text tower_cashout: {e}")
-                        logging.error(f"Тип ошибки: {type(e).__name__}")
-                        logging.error(f"Детали: user={user_id}, chat={call.message.chat.id}, msg={call.message.message_id}")
-                        # Пробуем отправить новое сообщение если редактирование не удалось
-                        try:
-                            bot.send_message(
-                                call.message.chat.id,
-                                format_tower_result(game, win_amount, True),
-                                parse_mode='HTML',
-                                reply_markup=get_tower_keyboard(game, show_all=True)
-                            )
-                        except Exception as e2:
-                            logging.error(f"Не удалось отправить новое сообщение: {e2}")
-
-                    # Потом удаляем игру
-                    with tower_lock:
-                        if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
-                            del active_tower_games[user_id]
-                    
-                    clear_action_processing_tower(user_id, action_key)
+                        if "message is not modified" not in str(e):
+                            logging.error(f"Ошибка edit_message_text tower_cashout: {e}")
+                            try:
+                                bot.send_message(
+                                    call.message.chat.id,
+                                    format_tower_result(game, win_amount, True),
+                                    parse_mode='HTML'
+                                )
+                            except:
+                                pass
+                    finally:
+                        clear_action_processing_tower(user_id, action_key)
                     return
 
             elif call.data == "tower_ignore":
