@@ -6,6 +6,7 @@ import time
 import threading
 import logging
 import hashlib
+import os
 
 import referrals
 
@@ -20,9 +21,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class TowerGame:
     def __init__(self, user_id, mines_count, bet_amount, chat_id=None, message_id=None):
-        self.user_id = user_id
-        self.mines_count = mines_count
-        self.bet_amount = bet_amount
+        # Валидация входных данных для безопасности
+        if not isinstance(user_id, (str, int)):
+            raise ValueError("Invalid user_id type")
+        if not isinstance(mines_count, int) or mines_count < 1 or mines_count > 4:
+            raise ValueError("Invalid mines_count: must be between 1 and 4")
+        if not isinstance(bet_amount, (int, float)) or bet_amount <= 0:
+            raise ValueError("Invalid bet_amount: must be positive")
+        
+        self.user_id = str(user_id)
+        self.mines_count = int(mines_count)
+        self.bet_amount = float(bet_amount)
         self.floor = 0
         self.game_active = True
         self.session_token = self.generate_session_token(user_id, 'tower')
@@ -30,9 +39,9 @@ class TowerGame:
             1: [1.2, 1.6, 2.3, 4.7],
             2: [1.5, 2.4, 6.0, 24.0],
             3: [1.8, 4.2, 16.0, 120.0],
-            4: [2.35, 7.0, 42.0, 400.0],
-            5: [3.15, 12.5, 90.0, 1600.0],
-            6: [3.6, 20.0, 160.0, 3000.0]
+            4: [2.4, 7.0, 42.0, 400.0],
+            5: [3.2, 12.5, 90.0, 1600.0],
+            6: [3.9, 20.0, 160.0, 3000.0]
         }
         self.mine_floors = {}
         self.selected_cells = {}
@@ -46,8 +55,9 @@ class TowerGame:
     def generate_session_token(self, user_id, game_type):
         """Генерирует уникальный токен для сессии игры"""
         timestamp = str(time.time())
-        data = f"{user_id}_{game_type}_{timestamp}"
-        return hashlib.md5(data.encode()).hexdigest()[:8]
+        random_component = str(random.randint(100000, 999999))
+        data = f"{user_id}_{game_type}_{timestamp}_{random_component}"
+        return hashlib.sha256(data.encode()).hexdigest()[:16]
 
     def generate_mines(self):
         for floor in range(1, 7):
@@ -56,6 +66,10 @@ class TowerGame:
             self.mine_floors[floor] = available_cells[:self.mines_count]
 
     def climb_floor(self, selected_cell):
+        # Валидация входных данных
+        if not isinstance(selected_cell, int) or selected_cell < 0 or selected_cell >= 5:
+            raise ValueError("Invalid selected_cell")
+        
         self.floor += 1
         current_floor = self.floor
 
@@ -65,6 +79,12 @@ class TowerGame:
         return True
 
     def add_selected_cell(self, floor, cell):
+        # Валидация входных данных
+        if not isinstance(floor, int) or floor < 1 or floor > 6:
+            raise ValueError("Invalid floor")
+        if not isinstance(cell, int) or cell < 0 or cell >= 5:
+            raise ValueError("Invalid cell")
+        
         if floor not in self.selected_cells:
             self.selected_cells[floor] = []
         if cell not in self.selected_cells[floor]:
@@ -89,13 +109,32 @@ class TowerGame:
 
 users_data_lock = threading.Lock()
 
+# Константы для безопасной работы с файлами
+DATA_FILE = 'users_data.json'
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB максимальный размер файла
+
 def load_users_data():
     """Загружает данные пользователей"""
     try:
+        # Проверка размера файла для безопасности
+        if os.path.exists(DATA_FILE):
+            file_size = os.path.getsize(DATA_FILE)
+            if file_size > MAX_FILE_SIZE:
+                logging.error(f"Файл данных слишком большой: {file_size} байт")
+                return {}
+        
         with users_data_lock:
-            with open('users_data.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Валидация структуры данных
+                if not isinstance(data, dict):
+                    logging.error("Неверная структура данных")
+                    return {}
+                return data
     except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        logging.error(f"Ошибка декодирования JSON: {e}")
         return {}
     except Exception as e:
         logging.error(f"Ошибка загрузки данных: {e}")
@@ -103,11 +142,29 @@ def load_users_data():
 
 def save_users_data(data):
     try:
+        # Валидация данных перед сохранением
+        if not isinstance(data, dict):
+            logging.error("Попытка сохранить некорректные данные")
+            return False
+        
         with users_data_lock:
-            with open('users_data.json', 'w', encoding='utf-8') as f:
+            # Создание временного файла для атомарной записи
+            temp_file = f"{DATA_FILE}.tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            # Атомарная замена файла
+            os.replace(temp_file, DATA_FILE)
+            return True
     except Exception as e:
         logging.error(f"Ошибка сохранения данных: {e}")
+        # Удаление временного файла в случае ошибки
+        try:
+            if os.path.exists(f"{DATA_FILE}.tmp"):
+                os.remove(f"{DATA_FILE}.tmp")
+        except:
+            pass
+        return False
 
 active_tower_games = {}
 user_temp_data_tower = {}
@@ -117,7 +174,7 @@ processing_actions_tower = {}
 processing_lock_tower = threading.Lock()
 
 MIN_BET = 25
-MAX_BET = float('inf')
+MAX_BET = 1000000  # Установлен разумный максимум вместо infinity
 
 GAME_TIMEOUT = 300
 
@@ -203,7 +260,7 @@ def start_cleanup_tower_thread():
     
     thread = threading.Thread(target=cleanup_worker, daemon=True)
     thread.start()
-    return thread
+    logging.info("Поток очистки неактивных игр Башня запущен")
 
 def rate_limit_tower(user_id):
     """Проверка ограничения по времени между нажатиями (0.4 секунды)"""
@@ -324,7 +381,12 @@ def get_tower_keyboard(game, show_all=False, show_current_mines=False):
 
 def format_tower_info(game):
     """Форматирует информацию об игре в красивый вид"""
-    next_mult = game.get_next_multiplier()
+    # Санитизация данных для предотвращения HTML injection
+    bet_amount = round(float(game.bet_amount), 2)
+    floor = int(game.floor)
+    mines_count = int(game.mines_count)
+    current_mult = round(float(game.get_current_multiplier()), 2)
+    next_mult = round(float(game.get_next_multiplier()), 2)
     
     game_lifetime = time.time() - game.created_time
     minutes = int(game_lifetime // 60)
@@ -345,26 +407,33 @@ def format_tower_info(game):
 
 <blockquote>
 <b>🎯 Конфигурация:</b>
-├ 💸Ставка: <b>{game.bet_amount}₽</b>
-├ 💣Мин на этаж: <b>{game.mines_count}</b>
-└ 📌Этаж: <b>{game.floor}/6</b>
+├ 💸Ставка: <b>{bet_amount}₽</b>
+├ 💣Мин на этаж: <b>{mines_count}</b>
+└ 📌Этаж: <b>{floor}/6</b>
 
 <b>📊 Множители:</b>
-├ ⬅️ Прошлый: <b>x{game.get_current_multiplier():.2f}</b>
-├ ✅ Текущий: <b>x{game.get_current_multiplier():.2f}</b>
+├ ⬅️ Прошлый: <b>x{current_mult:.2f}</b>
+├ ✅ Текущий: <b>x{current_mult:.2f}</b>
 └ ➡️ Следующий: <b>x{next_mult:.2f}</b>
 
 <b>⏰ Время игры:</b>
 └ {time_info}
 </blockquote>
 
-<i>Выберите безопасную ячейку на этаже {game.floor + 1}! Игра будет закрыта через 5 минут бездействия.</i>
+<i>Выберите безопасную ячейку на этаже {floor + 1}! Игра будет закрыта через 5 минут бездействия.</i>
 """
     return tower_info
 
 def format_tower_result(game, win_amount, is_win=False):
     """Форматирует результат игры"""
+    # Санитизация данных
+    bet_amount = round(float(game.bet_amount), 2)
+    floor = int(game.floor)
+    mines_count = int(game.mines_count)
+    current_mult = round(float(game.get_current_multiplier()), 2)
+    
     if is_win:
+        win_amount = round(float(win_amount), 2)
         return f"""
 <blockquote expandable>╔══════════════════════╗
    🎉 <b>ПОБЕДА!</b> 🎉
@@ -372,13 +441,13 @@ def format_tower_result(game, win_amount, is_win=False):
 
 <blockquote>
 <b>💰 Результат:</b>
-├ 💸Ставка: <b>{game.bet_amount}₽</b>
-├ 🍀Выигрыш: <b>{round(win_amount, 2)}₽</b>
-└ 📌Множитель: <b>x{game.get_current_multiplier():.2f}</b>
+├ 💸Ставка: <b>{bet_amount}₽</b>
+├ 🍀Выигрыш: <b>{win_amount}₽</b>
+└ 📌Множитель: <b>x{current_mult:.2f}</b>
 
 <b>📊 Статистика:</b>
-├ 💹Достигнут этаж: <b>{game.floor}/6</b>
-└ 💣Мин на этаж: <b>{game.mines_count}</b>
+├ 💹Достигнут этаж: <b>{floor}/6</b>
+└ 💣Мин на этаж: <b>{mines_count}</b>
 </blockquote>
 
 <i>Вы успешно прошли башню! Поздравляем! 🏰</i>
@@ -391,13 +460,13 @@ def format_tower_result(game, win_amount, is_win=False):
 
 <blockquote>
 <b>💰 Результат:</b>
-├ 💸Ставка: <b>{game.bet_amount}₽</b>
-├ 📉Потеряно: <b>{game.bet_amount}₽</b>
-└ 📌Множитель: <b>x{game.get_current_multiplier():.2f}</b>
+├ 💸Ставка: <b>{bet_amount}₽</b>
+├ 📉Потеряно: <b>{bet_amount}₽</b>
+└ 📌Множитель: <b>x{current_mult:.2f}</b>
 
 <b>📊 Статистика:</b>
-├ ❌Попали на мину на этаже: <b>{game.floor}/6</b>
-└ 💣Мин на этаж: <b>{game.mines_count}</b>
+├ ❌Попали на мину на этаже: <b>{floor}/6</b>
+└ 💣Мин на этаж: <b>{mines_count}</b>
 </blockquote>
 
 <i>Попали на мину! Попробуйте еще раз! 💪</i>
@@ -671,8 +740,14 @@ def register_tower_handlers(bot_instance):
                         bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
                         return
 
-            bet_amount = float(message.text)
-
+            # Валидация и очистка ввода
+            bet_text = message.text.strip()
+            
+            # Удаление валюты и пробелов
+            bet_text = bet_text.replace('₽', '').replace(' ', '').replace(',', '.')
+            
+            bet_amount = float(bet_text)
+            
             if bet_amount < MIN_BET:
                 bot.send_message(message.chat.id, f"❌ Минимальная ставка: {MIN_BET}₽")
                 return
@@ -680,6 +755,8 @@ def register_tower_handlers(bot_instance):
             if bet_amount > MAX_BET:
                 bot.send_message(message.chat.id, f"❌ Максимальная ставка: {MAX_BET}₽")
                 return
+            
+            bet_amount = round(bet_amount, 2)
 
             users_data = load_users_data()
 
@@ -809,12 +886,35 @@ def register_tower_handlers(bot_instance):
         try:
             user_id = str(call.from_user.id)
 
+            # Валидация callback_data для предотвращения injection
+            if not call.data or len(call.data) > 100:
+                logging.warning(f"Подозрительный callback_data от {user_id}")
+                return
+            
+            allowed_prefixes = ['tower_bet_', 'tower_custom_bet', 'tower_mines_', 'tower_custom_mines',
+                              'tower_climb_', 'tower_cashout', 'tower_ignore']
+            
+            if not any(call.data.startswith(prefix) or call.data == prefix.rstrip('_') for prefix in allowed_prefixes):
+                logging.warning(f"Неизвестный callback: {call.data} от {user_id}")
+                return
+
             action_key = ""
             if call.data.startswith("tower_climb_"):
                 parts = call.data.split('_')
-                floor_num = int(parts[2])
-                cell_num = int(parts[3])
-                action_key = f"climb_{floor_num}_{cell_num}"
+                if len(parts) != 4:
+                    logging.warning(f"Некорректный формат tower_climb от {user_id}")
+                    return
+                try:
+                    floor_num = int(parts[2])
+                    cell_num = int(parts[3])
+                    # Валидация диапазонов
+                    if not (1 <= floor_num <= 6) or not (0 <= cell_num < 5):
+                        logging.warning(f"Некорректные параметры tower_climb от {user_id}")
+                        return
+                    action_key = f"climb_{floor_num}_{cell_num}"
+                except (ValueError, IndexError):
+                    logging.warning(f"Ошибка парсинга tower_climb от {user_id}")
+                    return
             elif call.data == "tower_cashout":
                 action_key = "cashout"
             elif call.data.startswith("tower_bet_"):
@@ -838,6 +938,30 @@ def register_tower_handlers(bot_instance):
             users_data = load_users_data()
 
             if call.data.startswith("tower_bet_"):
+                # Валидация суммы ставки
+                try:
+                    bet_str = call.data.split("_")[2]
+                    bet_amount = float(bet_str)
+                    
+                    if bet_amount < MIN_BET or bet_amount > MAX_BET:
+                        try:
+                            bot.answer_callback_query(
+                                call.id, 
+                                f"❌ Ставка должна быть от {MIN_BET}₽ до {MAX_BET}₽",
+                                show_alert=True
+                            )
+                        except:
+                            pass
+                        clear_action_processing_tower(user_id, action_key)
+                        return
+                except (ValueError, IndexError):
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Некорректная сумма ставки", show_alert=True)
+                    except:
+                        pass
+                    clear_action_processing_tower(user_id, action_key)
+                    return
+                
                 with tower_lock:
                     if user_id in active_tower_games:
                         game = active_tower_games[user_id]
@@ -888,7 +1012,25 @@ def register_tower_handlers(bot_instance):
                 return
 
             elif call.data.startswith("tower_mines_"):
-                mines_count = int(call.data.split("_")[2])
+                # Валидация количества мин
+                try:
+                    mines_str = call.data.split("_")[2]
+                    mines_count = int(mines_str)
+                    
+                    if mines_count < 1 or mines_count > 4:
+                        try:
+                            bot.answer_callback_query(call.id, "❌ Количество мин должно быть от 1 до 4", show_alert=True)
+                        except:
+                            pass
+                        clear_action_processing_tower(user_id, action_key)
+                        return
+                except (ValueError, IndexError):
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Некорректное количество мин", show_alert=True)
+                    except:
+                        pass
+                    clear_action_processing_tower(user_id, action_key)
+                    return
 
                 with tower_lock:
                     if user_id in active_tower_games:
@@ -1039,6 +1181,7 @@ def register_tower_handlers(bot_instance):
                     clear_action_processing_tower(user_id, action_key)
                     return
 
+                # Используем уже провалидированные значения из начала функции
                 parts = call.data.split('_')
                 floor_num = int(parts[2])
                 cell_num = int(parts[3])
@@ -1055,9 +1198,28 @@ def register_tower_handlers(bot_instance):
                     
                     game.last_action_time = current_time
                     
-                    game.add_selected_cell(floor_num, cell_num)
+                    # Обработка с try-except для валидационных ошибок
+                    try:
+                        game.add_selected_cell(floor_num, cell_num)
+                    except ValueError as e:
+                        logging.error(f"Ошибка валидации в add_selected_cell: {e}")
+                        try:
+                            bot.answer_callback_query(call.id, "❌ Ошибка обработки хода", show_alert=True)
+                        except:
+                            pass
+                        clear_action_processing_tower(user_id, action_key)
+                        return
 
-                    success = game.climb_floor(cell_num)
+                    try:
+                        success = game.climb_floor(cell_num)
+                    except ValueError as e:
+                        logging.error(f"Ошибка валидации в climb_floor: {e}")
+                        try:
+                            bot.answer_callback_query(call.id, "❌ Ошибка обработки хода", show_alert=True)
+                        except:
+                            pass
+                        clear_action_processing_tower(user_id, action_key)
+                        return
 
                     if not success:
                         users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
@@ -1262,4 +1424,3 @@ def get_active_tower_games():
             'chat_id': game.chat_id,
             'message_id': game.message_id
         } for user_id, game in active_tower_games.items()}
-
