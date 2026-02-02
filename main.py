@@ -17,6 +17,7 @@ import leaders
 from referrals import register_referrals_handlers, add_referral_bonus, process_referral_join, send_referral_welcome_message, send_referral_notification_to_referrer
 from admin_panel import register_admin_handlers
 from games import register_games_handlers
+from bonus_system import register_bonus_handlers
 
 try:
     from payments import register_crypto_handlers
@@ -108,6 +109,7 @@ tower.register_tower_handlers(bot)
 register_referrals_handlers(bot)
 register_admin_handlers(bot)
 register_games_handlers(bot)
+register_bonus_handlers(bot)
 
 if PAYMENTS_ENABLED:
     register_crypto_handlers(bot)
@@ -924,4 +926,3 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
-
