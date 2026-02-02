@@ -1315,11 +1315,6 @@ def register_tower_handlers(bot_instance):
                     
                     game.game_active = False
                     
-                    # Сразу удаляем игру из активных
-                    with tower_lock:
-                        if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
-                            del active_tower_games[user_id]
-                    
                     win_amount = game.bet_amount * game.get_current_multiplier()
                     users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + win_amount, 2)
                     save_users_data(users_data)
@@ -1340,6 +1335,7 @@ def register_tower_handlers(bot_instance):
                         daemon=True
                     ).start()
 
+                    # Сначала обновляем клавиатуру
                     try:
                         bot.edit_message_text(
                             format_tower_result(game, win_amount, True),
@@ -1351,8 +1347,13 @@ def register_tower_handlers(bot_instance):
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logging.error(f"Ошибка edit_message_text tower_cashout: {e}")
-                    finally:
-                        clear_action_processing_tower(user_id, action_key)
+
+                    # Потом удаляем игру
+                    with tower_lock:
+                        if user_id in active_tower_games and active_tower_games[user_id].session_token == game.session_token:
+                            del active_tower_games[user_id]
+                    
+                    clear_action_processing_tower(user_id, action_key)
                     return
 
             elif call.data == "tower_ignore":
