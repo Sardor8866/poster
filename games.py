@@ -246,7 +246,7 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
 
                 if bet_amount > balance:
 
-                    bot.reply_to(message, \"❌ Недостаточно средств!\")
+                    bot.reply_to(message, "❌ Недостаточно средств!")
 
                     return
 
@@ -2276,3 +2276,4 @@ def register_games_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
             except:
                 pass
+
