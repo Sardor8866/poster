@@ -740,8 +740,7 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
         else:
-            users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
-            save_users_data(users_data)
+            users_data = load_users_data()
 
             try:
                 add_game_to_history(
@@ -1044,8 +1043,7 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
         else:
-            users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
-            save_users_data(users_data)
+            users_data = load_users_data()
 
             try:
                 add_game_to_history(
@@ -1380,8 +1378,7 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
         else:
-            users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
-            save_users_data(users_data)
+            users_data = load_users_data()
 
             try:
                 add_game_to_history(
@@ -2276,7 +2273,3 @@ def register_games_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
             except:
                 pass
-
-
-
-
