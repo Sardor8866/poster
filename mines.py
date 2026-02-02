@@ -1172,7 +1172,7 @@ def register_mines_handlers(bot_instance):
                             logging.error(f"Ошибка записи проигрыша в историю: {e}")
 
                         with mines_lock:
-                            if user_id in active_games and active_games[user_id].session_token == game.session_token:
+                            if user_id in active_games:
                                 del active_games[user_id]
 
                         try:
@@ -1226,12 +1226,12 @@ def register_mines_handlers(bot_instance):
                         clear_action_processing(user_id, action_key)
                         return
                     
-                    # УДАЛЯЕМ ИГРУ ИЗ АКТИВНЫХ СРАЗУ ЖЕ
+                    game.game_active = False
+                    
+                    # Сразу удаляем игру из активных
                     with mines_lock:
                         if user_id in active_games and active_games[user_id].session_token == game.session_token:
                             del active_games[user_id]
-                    
-                    game.game_active = False
                     
                     win_amount = game.bet_amount * game.multiplier
                     
