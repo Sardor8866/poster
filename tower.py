@@ -1318,6 +1318,12 @@ def register_tower_handlers(bot_instance):
                     win_amount = game.bet_amount * game.get_current_multiplier()
                     users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + win_amount, 2)
                     save_users_data(users_data)
+                    
+                    # Уведомляем пользователя
+                    try:
+                        bot.answer_callback_query(call.id, f"✅ Выигрыш {round(win_amount, 2)}₽ зачислен!")
+                    except:
+                        pass
 
                     try:
                         add_game_to_history(
