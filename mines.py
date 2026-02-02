@@ -1233,12 +1233,6 @@ def register_mines_handlers(bot_instance):
                     users_data = load_users_data()
                     users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + win_amount, 2)
                     save_users_data(users_data)
-                    
-                    # Уведомляем пользователя
-                    try:
-                        bot.answer_callback_query(call.id, f"✅ Выигрыш {round(win_amount, 2)}₽ зачислен!")
-                    except:
-                        pass
 
                     try:
                         add_game_to_history(
@@ -1256,9 +1250,11 @@ def register_mines_handlers(bot_instance):
                         daemon=True
                     ).start()
 
-                    # Сначала обновляем клавиатуру
+                    with mines_lock:
+                        if user_id in active_games and active_games[user_id].session_token == game.session_token:
+                            del active_games[user_id]
+
                     try:
-                        logging.info(f"Обновление сообщения для mine cashout: user={user_id}, chat={call.message.chat.id}, msg={call.message.message_id}")
                         bot.edit_message_text(
                             format_game_result(game, win_amount, True),
                             call.message.chat.id,
@@ -1266,26 +1262,17 @@ def register_mines_handlers(bot_instance):
                             parse_mode='HTML',
                             reply_markup=get_game_keyboard(game, game_over=True)
                         )
-                        logging.info(f"Сообщение успешно обновлено для user={user_id}")
                     except Exception as e:
-                        logging.error(f"КРИТИЧЕСКАЯ ОШИБКА edit_message_text mine_cashout: {e}")
-                        logging.error(f"Тип ошибки: {type(e).__name__}")
-                        logging.error(f"Детали: user={user_id}, chat={call.message.chat.id}, msg={call.message.message_id}")
-                        # Пробуем отправить новое сообщение если редактирование не удалось
-                        try:
-                            bot.send_message(
-                                call.message.chat.id,
-                                format_game_result(game, win_amount, True),
-                                parse_mode='HTML',
-                                reply_markup=get_game_keyboard(game, game_over=True)
-                            )
-                        except Exception as e2:
-                            logging.error(f"Не удалось отправить новое сообщение: {e2}")
-                    
-                    # Потом удаляем игру
-                    with mines_lock:
-                        if user_id in active_games and active_games[user_id].session_token == game.session_token:
-                            del active_games[user_id]
+                        if "message is not modified" not in str(e):
+                            logging.error(f"Ошибка edit_message_text mine_cashout: {e}")
+                            try:
+                                bot.send_message(
+                                    call.message.chat.id,
+                                    format_game_result(game, win_amount, True),
+                                    parse_mode='HTML'
+                                )
+                            except:
+                                pass
                     
                     clear_action_processing(user_id, action_key)
                     return
