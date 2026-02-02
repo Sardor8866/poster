@@ -552,7 +552,7 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
 
                bot.reply_to(message, "❌ Недостаточно средств!")
 
-                return
+               return
 
             users_data[user_id]['balance'] = round(balance - bet_amount, 2)
 
@@ -2276,5 +2276,6 @@ def register_games_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
             except:
                 pass
+
 
 
