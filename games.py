@@ -45,7 +45,7 @@ active_games = {}
 game_session_tokens = {}
 
 MIN_BET_DICE = 1
-MIN_BET_OTHER = 25
+MIN_BET_OTHER = 1
 MAX_BET = float('inf')
 
 def get_min_bet(game_type):
@@ -2276,6 +2276,5 @@ def register_games_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
             except:
                 pass
-
 
 
