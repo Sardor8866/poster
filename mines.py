@@ -138,7 +138,7 @@ mines_lock = threading.Lock()
 processing_actions = {}
 processing_lock = threading.Lock()
 
-MIN_BET = 25
+MIN_BET = 10
 MAX_BET = float('inf')
 
 GAME_TIMEOUT = 300
@@ -643,7 +643,7 @@ def register_mines_handlers(bot_instance):
 
 <b>⚙️ Параметры:</b>
 • Мины: от 2 до 24
-• Минимальная ставка: 25₽
+• Минимальная ставка: 10₽
 • Игра автоматически закрывается через 5 минут бездействия (ставка возвращается)
 </blockquote>"""
             bot.send_message(message.chat.id, help_text, parse_mode='HTML')
@@ -946,7 +946,7 @@ def register_mines_handlers(bot_instance):
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
-Введите сумму ставки (мин. 25₽):
+Введите сумму ставки (мин. 10₽):
 </blockquote>""",
                         parse_mode='HTML'
                     )
