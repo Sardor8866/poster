@@ -1233,6 +1233,12 @@ def register_mines_handlers(bot_instance):
                     users_data = load_users_data()
                     users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0) + win_amount, 2)
                     save_users_data(users_data)
+                    
+                    # Уведомляем пользователя
+                    try:
+                        bot.answer_callback_query(call.id, f"✅ Выигрыш {round(win_amount, 2)}₽ зачислен!")
+                    except:
+                        pass
 
                     try:
                         add_game_to_history(
