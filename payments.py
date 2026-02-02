@@ -6,7 +6,6 @@ import random
 import string
 import requests
 import time
-import threading
 from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -39,9 +38,6 @@ user_last_action = {}
 pending_invoices = {}
 user_states = {}
 admin_states = {}
-
-# Блокировка для защиты от дублирования вывода средств
-withdraw_lock = threading.Lock()
 
 exchange_rates = {
     "USD_RUB": None,
@@ -107,39 +103,29 @@ def save_pending_withdrawals(withdrawals):
 def add_pending_withdrawal(user_id, amount_rub, username, crypto_type="USDT"):
     """Добавляет вывод в ожидание"""
     try:
-        with withdraw_lock:
-            # Повторная проверка баланса внутри блокировки
-            users_data = load_users_data()
-            user_id_str = str(user_id)
-            current_balance = users_data.get(user_id_str, {}).get('balance', 0)
-            
-            if current_balance < amount_rub:
-                logging.warning(f"Недостаточно средств для вывода: {user_id}, баланс: {current_balance}, запрошено: {amount_rub}")
-                return None
-            
-            withdrawals = load_pending_withdrawals()
+        withdrawals = load_pending_withdrawals()
 
-            withdrawal = {
-                'id': len(withdrawals) + 1,
-                'user_id': int(user_id),
-                'username': username,
-                'amount_rub': float(amount_rub),
-                'amount_usd': round(float(amount_rub) / get_exchange_rate(), 6),
-                'crypto_type': crypto_type,
-                'status': 'pending',
-                'created_at': int(time.time()),
-                'processed_by': None,
-                'processed_at': None
-            }
+        withdrawal = {
+            'id': len(withdrawals) + 1,
+            'user_id': int(user_id),
+            'username': username,
+            'amount_rub': float(amount_rub),
+            'amount_usd': round(float(amount_rub) / get_exchange_rate(), 6),
+            'crypto_type': crypto_type,
+            'status': 'pending',
+            'created_at': int(time.time()),
+            'processed_by': None,
+            'processed_at': None
+        }
 
-            withdrawals.append(withdrawal)
+        withdrawals.append(withdrawal)
 
-            if save_pending_withdrawals(withdrawals):
-                logging.info(f"✅ Вывод добавлен в ожидание: {user_id}, {amount_rub} ₽")
-                return withdrawal['id']
-            else:
-                logging.error(f"❌ Ошибка сохранения вывода для {user_id}")
-                return None
+        if save_pending_withdrawals(withdrawals):
+            logging.info(f"✅ Вывод добавлен в ожидание: {user_id}, {amount_rub} ₽")
+            return withdrawal['id']
+        else:
+            logging.error(f"❌ Ошибка сохранения вывода для {user_id}")
+            return None
 
     except Exception as e:
         logging.error(f"Ошибка в add_pending_withdrawal: {e}")
@@ -1768,38 +1754,208 @@ def register_crypto_handlers(bot):
         """Обрабатывает вывод в рублях"""
         try:
             user_id = str(call.from_user.id)
-            
-            # Защита от дублирования вывода
-            with withdraw_lock:
+            users_data = load_users_data()
+            balance_rub = users_data.get(user_id, {}).get('balance', 0)
+
+            if amount_rub < MIN_WITHDRAW_RUB:
+                bot.answer_callback_query(call.id, f"❌ Минимум {MIN_WITHDRAW_RUB} ₽")
+                return
+
+            if amount_rub > MAX_WITHDRAW_RUB:
+                bot.answer_callback_query(call.id, f"❌ Максимум {MAX_WITHDRAW_RUB} ₽")
+                return
+
+            if balance_rub < amount_rub:
+                bot.answer_callback_query(call.id, "❌ Недостаточно средств")
+                return
+
+            if TREASURY_MODE == "real":
+                treasury_balance_usd, treasury_balance_rub = get_treasury_balance()
+                logging.info(f"Баланс казны для вывода: {treasury_balance_rub} ₽, запрошено: {amount_rub} ₽")
+
+                if treasury_balance_rub < amount_rub:
+                    bot.answer_callback_query(call.id, f"❌ Недостаточно средств в казне\n🏦 Доступно: {treasury_balance_rub:.2f} ₽")
+                    return
+
+                bot.answer_callback_query(call.id, "⏳ Создаем чек...")
+
+                check = create_cryptobot_check(amount_rub, user_id, "USDT")
+
+                if not check:
+                    bot.answer_callback_query(call.id, "❌ Ошибка создания чека")
+                    return
+
+                users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
+                save_users_data(users_data)
+
+                add_transaction(user_id, amount_rub, 'withdraw', 'completed', 'USDT')
+
+                current_rate = get_exchange_rate()
+
+                display = f"""
+<blockquote expandable>╔══════════════════════╗
+   ✅ <b>ВЫВОД ОФОРМЛЕН</b> ✅
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+💰 <b>Сумма:</b> {amount_rub} ₽
+💎 <b>Крипта:</b> USDT (TRC20)
+📈 <b>Курс:</b> 1$ ≈ {current_rate} ₽
+🔢 <b>К получению:</b> {check['amount_usd']} USDT
+🎯 <b>Статус:</b> Чек создан
+</blockquote>
+
+💎 <i>Для получения нажмите кнопку:</i>
+"""
+
+                markup = types.InlineKeyboardMarkup()
+                markup.row(types.InlineKeyboardButton("💳 Получить чек", url=check['bot_check_url']))
+                markup.row(types.InlineKeyboardButton("⬅️ В профиль", callback_data="crypto_back_profile"))
+
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.send_message(
+                    call.message.chat.id,
+                    display,
+                    parse_mode='HTML',
+                    reply_markup=markup
+                )
+
+                # ====== ОТПРАВКА УВЕДОМЛЕНИЯ В ГРУППУ ПОСЛЕ ВЫДАЧИ ЧЕКА ======
+                try:
+                    username = call.from_user.username or call.from_user.first_name or "Пользователь"
+                    send_notification_to_group(bot, "withdraw", username, amount_rub)
+                except Exception as notify_error:
+                    logging.error(f"Ошибка отправки уведомления: {notify_error}")
+                # ==============================================================
+
+            else:
+                bot.answer_callback_query(call.id, "⏳ Создаем заявку на вывод...")
+
+                username = call.from_user.username or call.from_user.first_name or "Пользователь"
+
+                withdrawal_id = add_pending_withdrawal(user_id, amount_rub, username, "USDT")
+
+                if not withdrawal_id:
+                    bot.answer_callback_query(call.id, "❌ Ошибка создания заявки")
+                    return
+
+                users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
+                save_users_data(users_data)
+
+                add_transaction(user_id, amount_rub, 'withdraw', 'pending', 'USDT', withdrawal_id)
+
+                current_rate = get_exchange_rate()
+                amount_usd = convert_rub_to_usd(amount_rub)
+
+                display = f"""
+<blockquote expandable>╔══════════════════════╗
+   ⏳ <b>ЗАЯВКА СОЗДАНА
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+💰 <b>Сумма:</b> {amount_rub} ₽
+💎 <b>Крипта:</b> USDT (TRC20)
+📈 <b>Курс:</b> 1$ ≈ {current_rate} ₽
+🔢 <b>К получению:</b> {amount_usd:.6f} USDT
+🎯 <b>Статус:</b> Ожидает одобрения
+</blockquote>
+
+📋 <i>Заявка отправлена администратору</i>
+<i>Средства будут заморожены до обработки</i>
+"""
+
+                markup = types.InlineKeyboardMarkup()
+                markup.row(types.InlineKeyboardButton("⬅️ В профиль", callback_data="crypto_back_profile"))
+
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.send_message(
+                    call.message.chat.id,
+                    display,
+                    parse_mode='HTML',
+                    reply_markup=markup
+                )
+
+                try:
+                    admin_display = f"""
+<blockquote expandable>╔══════════════════════╗
+   ⏳ <b>НОВАЯ ЗАЯВКА
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+👤 <b>Пользователь:</b> @{username}
+🆔 <b>ID:</b> <code>{user_id}</code>
+━━━━━━━━━━━━━━━━━━━━
+💰 <b>Сумма:</b> {amount_rub:.2f} ₽
+💎 <b>Крипта:</b> USDT (TRC20)
+🔢 <b>К выдаче:</b> {amount_usd:.6f} USDT
+</blockquote>
+
+📋 <i>Новая заявка на вывод ожидает обработки</i>
+
+💻 <b>Используйте команды:</b>
+<code>/check pending</code> - посмотреть ожидающие
+<code>/check approve {withdrawal_id}</code> - одобрить
+<code>/check reject {withdrawal_id}</code> - отклонить
+"""
+
+                    bot.send_message(
+                        ADMIN_ID,
+                        admin_display,
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    logging.error(f"Ошибка уведомления администратора: {e}")
+
+        except Exception as e:
+            logging.exception(f"Ошибка process_withdraw: {e}")
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+
+    def process_custom_withdraw(message, bot):
+        """Обрабатывает кастомный вывод в рублях"""
+        try:
+            user_id = str(message.from_user.id)
+            if user_id not in user_states or user_states[user_id].get("action") != "waiting_withdraw_amount":
+                bot.send_message(message.chat.id, "❌ Ошибка. Начните заново.")
+                return
+
+            user_states.pop(user_id, None)
+
+            try:
+                amount_rub = float(message.text)
                 users_data = load_users_data()
                 balance_rub = users_data.get(user_id, {}).get('balance', 0)
 
                 if amount_rub < MIN_WITHDRAW_RUB:
-                    bot.answer_callback_query(call.id, f"❌ Минимум {MIN_WITHDRAW_RUB} ₽")
+                    bot.send_message(message.chat.id, f"❌ Минимум {MIN_WITHDRAW_RUB} ₽")
                     return
 
                 if amount_rub > MAX_WITHDRAW_RUB:
-                    bot.answer_callback_query(call.id, f"❌ Максимум {MAX_WITHDRAW_RUB} ₽")
+                    bot.send_message(message.chat.id, f"❌ Максимум {MAX_WITHDRAW_RUB} ₽")
                     return
 
                 if balance_rub < amount_rub:
-                    bot.answer_callback_query(call.id, "❌ Недостаточно средств")
+                    bot.send_message(message.chat.id, "❌ Недостаточно средств")
+                    return
+
+                allowed, message_text = check_cooldown(user_id, "withdraw")
+                if not allowed:
+                    bot.send_message(message.chat.id, message_text)
                     return
 
                 if TREASURY_MODE == "real":
                     treasury_balance_usd, treasury_balance_rub = get_treasury_balance()
-                    logging.info(f"Баланс казны для вывода: {treasury_balance_rub} ₽, запрошено: {amount_rub} ₽")
+                    logging.info(f"Баланс казны для кастомного вывода: {treasury_balance_rub} ₽, запрошено: {amount_rub} ₽")
 
                     if treasury_balance_rub < amount_rub:
-                        bot.answer_callback_query(call.id, f"❌ Недостаточно средств в казне\n🏦 Доступно: {treasury_balance_rub:.2f} ₽")
+                        bot.send_message(message.chat.id, f"❌ Недостаточно средств в казне\n🏦 Доступно: {treasury_balance_rub:.2f} ₽")
                         return
 
-                    bot.answer_callback_query(call.id, "⏳ Создаем чек...")
+                    bot.send_message(message.chat.id, "⏳ Создаем чек...")
 
                     check = create_cryptobot_check(amount_rub, user_id, "USDT")
 
                     if not check:
-                        bot.answer_callback_query(call.id, "❌ Ошибка создания чека")
+                        bot.send_message(message.chat.id, "❌ Ошибка создания чека")
                         return
 
                     users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
@@ -1829,9 +1985,8 @@ def register_crypto_handlers(bot):
                     markup.row(types.InlineKeyboardButton("💳 Получить чек", url=check['bot_check_url']))
                     markup.row(types.InlineKeyboardButton("⬅️ В профиль", callback_data="crypto_back_profile"))
 
-                    bot.delete_message(call.message.chat.id, call.message.message_id)
                     bot.send_message(
-                        call.message.chat.id,
+                        message.chat.id,
                         display,
                         parse_mode='HTML',
                         reply_markup=markup
@@ -1839,21 +1994,21 @@ def register_crypto_handlers(bot):
 
                     # ====== ОТПРАВКА УВЕДОМЛЕНИЯ В ГРУППУ ПОСЛЕ ВЫДАЧИ ЧЕКА ======
                     try:
-                        username = call.from_user.username or call.from_user.first_name or "Пользователь"
+                        username = message.from_user.username or message.from_user.first_name or "Пользователь"
                         send_notification_to_group(bot, "withdraw", username, amount_rub)
                     except Exception as notify_error:
                         logging.error(f"Ошибка отправки уведомления: {notify_error}")
                     # ==============================================================
 
                 else:
-                    bot.answer_callback_query(call.id, "⏳ Создаем заявку на вывод...")
+                    bot.send_message(message.chat.id, "⏳ Создаем заявку на вывод...")
 
-                    username = call.from_user.username or call.from_user.first_name or "Пользователь"
+                    username = message.from_user.username or message.from_user.first_name or "Пользователь"
 
                     withdrawal_id = add_pending_withdrawal(user_id, amount_rub, username, "USDT")
 
                     if not withdrawal_id:
-                        bot.answer_callback_query(call.id, "❌ Ошибка создания заявки")
+                        bot.send_message(message.chat.id, "❌ Ошибка создания заявки")
                         return
 
                     users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
@@ -1884,9 +2039,8 @@ def register_crypto_handlers(bot):
                     markup = types.InlineKeyboardMarkup()
                     markup.row(types.InlineKeyboardButton("⬅️ В профиль", callback_data="crypto_back_profile"))
 
-                    bot.delete_message(call.message.chat.id, call.message.message_id)
                     bot.send_message(
-                        call.message.chat.id,
+                        message.chat.id,
                         display,
                         parse_mode='HTML',
                         reply_markup=markup
@@ -1922,180 +2076,6 @@ def register_crypto_handlers(bot):
                         )
                     except Exception as e:
                         logging.error(f"Ошибка уведомления администратора: {e}")
-
-        except Exception as e:
-            logging.exception(f"Ошибка process_withdraw: {e}")
-            bot.answer_callback_query(call.id, "❌ Ошибка")
-
-    def process_custom_withdraw(message, bot):
-        """Обрабатывает кастомный вывод в рублях"""
-        try:
-            user_id = str(message.from_user.id)
-            if user_id not in user_states or user_states[user_id].get("action") != "waiting_withdraw_amount":
-                bot.send_message(message.chat.id, "❌ Ошибка. Начните заново.")
-                return
-
-            user_states.pop(user_id, None)
-
-            try:
-                amount_rub = float(message.text)
-                
-                # Защита от дублирования вывода
-                with withdraw_lock:
-                    users_data = load_users_data()
-                    balance_rub = users_data.get(user_id, {}).get('balance', 0)
-
-                    if amount_rub < MIN_WITHDRAW_RUB:
-                        bot.send_message(message.chat.id, f"❌ Минимум {MIN_WITHDRAW_RUB} ₽")
-                        return
-
-                    if amount_rub > MAX_WITHDRAW_RUB:
-                        bot.send_message(message.chat.id, f"❌ Максимум {MAX_WITHDRAW_RUB} ₽")
-                        return
-
-                    if balance_rub < amount_rub:
-                        bot.send_message(message.chat.id, "❌ Недостаточно средств")
-                        return
-
-                    allowed, message_text = check_cooldown(user_id, "withdraw")
-                    if not allowed:
-                        bot.send_message(message.chat.id, message_text)
-                        return
-
-                    if TREASURY_MODE == "real":
-                        treasury_balance_usd, treasury_balance_rub = get_treasury_balance()
-                        logging.info(f"Баланс казны для кастомного вывода: {treasury_balance_rub} ₽, запрошено: {amount_rub} ₽")
-
-                        if treasury_balance_rub < amount_rub:
-                            bot.send_message(message.chat.id, f"❌ Недостаточно средств в казне\n🏦 Доступно: {treasury_balance_rub:.2f} ₽")
-                            return
-
-                        bot.send_message(message.chat.id, "⏳ Создаем чек...")
-
-                        check = create_cryptobot_check(amount_rub, user_id, "USDT")
-
-                        if not check:
-                            bot.send_message(message.chat.id, "❌ Ошибка создания чека")
-                            return
-
-                        users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
-                        save_users_data(users_data)
-
-                        add_transaction(user_id, amount_rub, 'withdraw', 'completed', 'USDT')
-
-                        current_rate = get_exchange_rate()
-
-                        display = f"""
-<blockquote expandable>╔══════════════════════╗
-   ✅ <b>ВЫВОД ОФОРМЛЕН</b> ✅
-╚══════════════════════╝</blockquote>
-
-<blockquote>
-💰 <b>Сумма:</b> {amount_rub} ₽
-💎 <b>Крипта:</b> USDT (TRC20)
-📈 <b>Курс:</b> 1$ ≈ {current_rate} ₽
-🔢 <b>К получению:</b> {check['amount_usd']} USDT
-🎯 <b>Статус:</b> Чек создан
-</blockquote>
-
-💎 <i>Для получения нажмите кнопку:</i>
-"""
-
-                        markup = types.InlineKeyboardMarkup()
-                        markup.row(types.InlineKeyboardButton("💳 Получить чек", url=check['bot_check_url']))
-                        markup.row(types.InlineKeyboardButton("⬅️ В профиль", callback_data="crypto_back_profile"))
-
-                        bot.send_message(
-                            message.chat.id,
-                            display,
-                            parse_mode='HTML',
-                            reply_markup=markup
-                        )
-
-                        # ====== ОТПРАВКА УВЕДОМЛЕНИЯ В ГРУППУ ПОСЛЕ ВЫДАЧИ ЧЕКА ======
-                        try:
-                            username = message.from_user.username or message.from_user.first_name or "Пользователь"
-                            send_notification_to_group(bot, "withdraw", username, amount_rub)
-                        except Exception as notify_error:
-                            logging.error(f"Ошибка отправки уведомления: {notify_error}")
-                    # ==============================================================
-
-                    else:
-                        bot.send_message(message.chat.id, "⏳ Создаем заявку на вывод...")
-
-                        username = message.from_user.username or message.from_user.first_name or "Пользователь"
-
-                        withdrawal_id = add_pending_withdrawal(user_id, amount_rub, username, "USDT")
-
-                        if not withdrawal_id:
-                            bot.send_message(message.chat.id, "❌ Ошибка создания заявки")
-                            return
-
-                        users_data[user_id]['balance'] = round(balance_rub - amount_rub, 2)
-                        save_users_data(users_data)
-
-                        add_transaction(user_id, amount_rub, 'withdraw', 'pending', 'USDT', withdrawal_id)
-
-                        current_rate = get_exchange_rate()
-                        amount_usd = convert_rub_to_usd(amount_rub)
-
-                        display = f"""
-<blockquote expandable>╔══════════════════════╗
-   ⏳ <b>ЗАЯВКА СОЗДАНА
-╚══════════════════════╝</blockquote>
-
-<blockquote>
-💰 <b>Сумма:</b> {amount_rub} ₽
-💎 <b>Крипта:</b> USDT (TRC20)
-📈 <b>Курс:</b> 1$ ≈ {current_rate} ₽
-🔢 <b>К получению:</b> {amount_usd:.6f} USDT
-🎯 <b>Статус:</b> Ожидает одобрения
-</blockquote>
-
-📋 <i>Заявка отправлена администратору</i>
-<i>Средства будут заморожены до обработки</i>
-"""
-
-                        markup = types.InlineKeyboardMarkup()
-                        markup.row(types.InlineKeyboardButton("⬅️ В профиль", callback_data="crypto_back_profile"))
-
-                        bot.send_message(
-                            message.chat.id,
-                            display,
-                            parse_mode='HTML',
-                            reply_markup=markup
-                        )
-
-                        try:
-                            admin_display = f"""
-<blockquote expandable>╔══════════════════════╗
-   ⏳ <b>НОВАЯ ЗАЯВКА
-╚══════════════════════╝</blockquote>
-
-<blockquote>
-👤 <b>Пользователь:</b> @{username}
-🆔 <b>ID:</b> <code>{user_id}</code>
-━━━━━━━━━━━━━━━━━━━━
-💰 <b>Сумма:</b> {amount_rub:.2f} ₽
-💎 <b>Крипта:</b> USDT (TRC20)
-🔢 <b>К выдаче:</b> {amount_usd:.6f} USDT
-</blockquote>
-
-📋 <i>Новая заявка на вывод ожидает обработки</i>
-
-💻 <b>Используйте команды:</b>
-<code>/check pending</code> - посмотреть ожидающие
-<code>/check approve {withdrawal_id}</code> - одобрить
-<code>/check reject {withdrawal_id}</code> - отклонить
-"""
-
-                            bot.send_message(
-                                ADMIN_ID,
-                                admin_display,
-                                parse_mode='HTML'
-                            )
-                        except Exception as e:
-                            logging.error(f"Ошибка уведомления администратора: {e}")
 
             except ValueError:
                 bot.send_message(message.chat.id, "❌ Введите число!")
