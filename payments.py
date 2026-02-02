@@ -20,12 +20,9 @@ except ImportError:
 CRYPTOBOT_TOKEN = "477733:AAzooy5vcnCpJuGgTZc1Rdfbu71bqmrRMgr"
 ADMIN_ID = "8118184388"
 
-# ======= НАСТРОЙКА ID ГРУППЫ ДЛЯ УВЕДОМЛЕНИЙ =======
-# Замените -1001234567890 на ID вашей группы
-NOTIFICATION_GROUP_ID = "-1001234567890"  # ← УКАЖИТЕ ЗДЕСЬ ID ВАШЕЙ ГРУППЫ
-# ===================================================
 
-# URL изображений для уведомлений
+NOTIFICATION_GROUP_ID = "-1003647626166"  
+
 WITHDRAW_IMAGE_URL = "https://i.ibb.co/5WP3qHWz/withdraw.jpg"  # Изображение для вывода
 DEPOSIT_IMAGE_URL = "https://i.ibb.co/F4v9vLRK/deposit.jpg"   # Изображение для пополнения
 
