@@ -175,7 +175,7 @@ def get_user_avatar(user_id):
 
 def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton("🔥 Профиль"), types.KeyboardButton("👥 Рефералы"))
+    markup.row(types.KeyboardButton("❄️ Профиль"), types.KeyboardButton("👥 Рефералы"))
     markup.row(types.KeyboardButton("🏆 ТОП Игроков"))
     markup.row(types.KeyboardButton("🎮 Игры"))
     markup.row(types.KeyboardButton("ℹ️ О проекте"))
@@ -325,7 +325,7 @@ def start_message(message):
     if is_referral_join and referrer_data and is_new_user:
         welcome_text = f"""
 <blockquote expandable>╔══════════════════════╗
-   🔥 <b>FLAME GAME</b> 🔥
+   ❄️ <b>FESTERY GAME</b> ❄️
 ╚══════════════════════╝</blockquote>
 
 ✨ <b>Добро пожаловать, {user_first_name}!</b>
@@ -338,12 +338,12 @@ def start_message(message):
 </blockquote>
 
 <blockquote>
-<b>🔥 ДОСТУПНЫЕ ИГРЫ:</b>
+<b>❄️ ДОСТУПНЫЕ ИГРЫ:</b>
 <code>💣 Мины | 🏰 Башня</code>
 <code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
 </blockquote>
 
-<i>🔥 Удачной игры и больших побед!</i>
+<i>❄️ Удачной игры и больших побед!</i>
 """
 
         if referrer_id:
@@ -355,7 +355,7 @@ def start_message(message):
     elif is_new_user:
         welcome_text = f"""
 <blockquote expandable>╔══════════════════════╗
-   🔥 <b>FLAME GAME</b> 🔥
+   ❄️ <b>FESTERY GAME</b> ❄️
 ╚══════════════════════╝</blockquote>
 
 ✨ <b>Добро пожаловать, {user_first_name}!</b>
@@ -368,7 +368,7 @@ def start_message(message):
 </blockquote>
 
 <blockquote>
-<b>🔥 ДОСТУПНЫЕ ИГРЫ:</b>
+<b>❄️ ДОСТУПНЫЕ ИГРЫ:</b>
 <code>💣 Мины | 🏰 Башня</code>
 <code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
 </blockquote>
@@ -390,7 +390,7 @@ def start_message(message):
 
         welcome_text = f"""
 <blockquote expandable>╔══════════════════════╗
-   🔥 <b>FLAME GAME</b> 🔥
+   ❄️ <b>FESTERY GAME</b> ❄️
 ╚══════════════════════╝</blockquote>
 
 ✨ <b>С возвращением, {user_first_name}!</b>
@@ -403,7 +403,7 @@ def start_message(message):
 </blockquote>
 
 <blockquote>
-<b>🔥 ДОСТУПНЫЕ ИГРЫ:</b>
+<b>❄️ ДОСТУПНЫЕ ИГРЫ:</b>
 <code>💣 Мины | 🏰 Башня</code>
 <code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
 </blockquote>
@@ -487,7 +487,7 @@ def profile_command(message):
 
     profile_text = f"""
 <blockquote expandable>╔══════════════════════╗
-   🔥 <b>FLAME PROFILE</b> 🔥
+   ❄️ <b>FESTERY PROFILE</b> ❄️
 ╚══════════════════════╝</blockquote>
 
 <b>👤 Игрок:</b> @{username}
@@ -695,7 +695,7 @@ def menu_handler(message):
     user_id = str(user.id)
     users_data = load_users_data()
 
-    if text == "🔥 Профиль":
+    if text == "❄️ Профиль":
         if user_id in users_data:
             user_info = users_data[user_id]
             username = user.username if user.username else user.first_name
@@ -711,7 +711,7 @@ def menu_handler(message):
 
             profile_text = f"""
 <blockquote expandable>╔══════════════════════╗
-   🔥 <b>FLAME PROFILE</b> 🔥
+   ❄️ <b>FESTERY PROFILE</b> ❄️
 ╚══════════════════════╝</blockquote>
 
 <b>👤 Игрок:</b> @{username}
@@ -843,7 +843,7 @@ def menu_handler(message):
     elif text == "ℹ️ О проекте":
         info_text = """
 <blockquote expandable>╔══════════════════════╗
-   🔥 <b>FLAME GAME</b> 🔥
+   ❄️ <b>FESTERY GAME</b> ❄️
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
@@ -868,7 +868,7 @@ Flame Game - это современная игровая
 Ваши данные в безопасности
 </blockquote>
 
-<i>🔥 Присоединяйся к Flame Game сегодня!</i>
+<i>❄️ Присоединяйся к Festery Game сегодня!</i>
 """
         bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_markup=main_menu())
 
@@ -1000,5 +1000,6 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
+
 
 
