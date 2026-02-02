@@ -6,6 +6,7 @@ import time
 import threading
 import logging
 import hashlib
+import os
 from contextlib import contextmanager
 
 import referrals
@@ -21,9 +22,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class MinesGame:
     def __init__(self, user_id, mines_count, bet_amount, chat_id=None, message_id=None):
-        self.user_id = user_id
-        self.mines_count = mines_count
-        self.bet_amount = bet_amount
+        # Валидация входных данных для безопасности
+        if not isinstance(user_id, (str, int)):
+            raise ValueError("Invalid user_id type")
+        if not isinstance(mines_count, int) or mines_count < 2 or mines_count > 24:
+            raise ValueError("Invalid mines_count: must be between 2 and 24")
+        if not isinstance(bet_amount, (int, float)) or bet_amount <= 0:
+            raise ValueError("Invalid bet_amount: must be positive")
+        
+        self.user_id = str(user_id)
+        self.mines_count = int(mines_count)
+        self.bet_amount = float(bet_amount)
         self.grid_size = 5
         self.grid = [[0 for _ in range(self.grid_size)] for _ in range(self.grid_size)]
         self.revealed = [[False for _ in range(self.grid_size)] for _ in range(self.grid_size)]
@@ -80,6 +89,9 @@ class MinesGame:
         return 1.0
 
     def reveal_cell(self, x, y):
+        # Валидация входных данных
+        if not isinstance(x, int) or not isinstance(y, int):
+            raise ValueError("Invalid cell coordinates type")
         if not (0 <= x < self.grid_size and 0 <= y < self.grid_size):
             return False
 
@@ -105,13 +117,32 @@ class MinesGame:
 
 users_data_lock = threading.Lock()
 
+# Константы для безопасной работы с файлами
+DATA_FILE = 'users_data.json'
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB максимальный размер файла
+
 def load_users_data():
     """Загружает данные пользователей"""
     try:
+        # Проверка размера файла для безопасности
+        if os.path.exists(DATA_FILE):
+            file_size = os.path.getsize(DATA_FILE)
+            if file_size > MAX_FILE_SIZE:
+                logging.error(f"Файл данных слишком большой: {file_size} байт")
+                return {}
+        
         with users_data_lock:
-            with open('users_data.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Валидация структуры данных
+                if not isinstance(data, dict):
+                    logging.error("Неверная структура данных")
+                    return {}
+                return data
     except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        logging.error(f"Ошибка декодирования JSON: {e}")
         return {}
     except Exception as e:
         logging.error(f"Ошибка загрузки данных: {e}")
@@ -119,17 +150,36 @@ def load_users_data():
 
 def save_users_data(data):
     try:
+        # Валидация данных перед сохранением
+        if not isinstance(data, dict):
+            logging.error("Попытка сохранить некорректные данные")
+            return False
+        
         with users_data_lock:
-            with open('users_data.json', 'w', encoding='utf-8') as f:
+            # Создание временного файла для атомарной записи
+            temp_file = f"{DATA_FILE}.tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            # Атомарная замена файла
+            os.replace(temp_file, DATA_FILE)
+            return True
     except Exception as e:
         logging.error(f"Ошибка сохранения данных: {e}")
+        # Удаление временного файла в случае ошибки
+        try:
+            if os.path.exists(f"{DATA_FILE}.tmp"):
+                os.remove(f"{DATA_FILE}.tmp")
+        except:
+            pass
+        return False
 
 def generate_session_token(user_id, game_type):
     """Генерирует уникальный токен для сессии игры"""
     timestamp = str(time.time())
-    data = f"{user_id}_{game_type}_{timestamp}"
-    return hashlib.md5(data.encode()).hexdigest()[:8]
+    random_component = str(random.randint(100000, 999999))
+    data = f"{user_id}_{game_type}_{timestamp}_{random_component}"
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 active_games = {}
 user_temp_data = {}
@@ -139,7 +189,7 @@ processing_actions = {}
 processing_lock = threading.Lock()
 
 MIN_BET = 25
-MAX_BET = float('inf')
+MAX_BET = 1000000  # Установлен разумный максимум вместо infinity
 
 GAME_TIMEOUT = 300
 
@@ -327,7 +377,13 @@ def get_game_keyboard(game, game_over=False):
 
 def format_game_info(game):
     """Форматирует информацию об игре в красивый вид"""
-    next_mult = game.get_next_multiplier()
+    # Санитизация данных для предотвращения HTML injection
+    bet_amount = round(float(game.bet_amount), 2)
+    mines_count = int(game.mines_count)
+    opened_cells = int(game.opened_cells)
+    previous_mult = round(float(game.previous_multiplier), 2)
+    current_mult = round(float(game.multiplier), 2)
+    next_mult = round(float(game.get_next_multiplier()), 2)
     
     game_lifetime = time.time() - game.created_time
     minutes = int(game_lifetime // 60)
@@ -348,13 +404,13 @@ def format_game_info(game):
 
 <blockquote>
 <b>🎯 Конфигурация:</b>
-├ 💸Ставка: <b>{game.bet_amount}₽</b>
-├ 💣Мины: <b>{game.mines_count}</b>
-└ 💹Открыто: <b>{game.opened_cells}</b> ячеек
+├ 💸Ставка: <b>{bet_amount}₽</b>
+├ 💣Мины: <b>{mines_count}</b>
+└ 💹Открыто: <b>{opened_cells}</b> ячеек
 
 <b>📊 Множители:</b>
-├ ⬅️ Прошлый: <b>x{game.previous_multiplier:.2f}</b>
-├ ✅ Текущий: <b>x{game.multiplier:.2f}</b>
+├ ⬅️ Прошлый: <b>x{previous_mult:.2f}</b>
+├ ✅ Текущий: <b>x{current_mult:.2f}</b>
 └ ➡️ Следующий: <b>x{next_mult:.2f}</b>
 
 <b>⏰ Время игры:</b>
@@ -367,7 +423,14 @@ def format_game_info(game):
 
 def format_game_result(game, win_amount, is_win=False):
     """Форматирует результат игры"""
+    # Санитизация данных
+    bet_amount = round(float(game.bet_amount), 2)
+    mines_count = int(game.mines_count)
+    opened_cells = int(game.opened_cells)
+    current_mult = round(float(game.multiplier), 2)
+    
     if is_win:
+        win_amount = round(float(win_amount), 2)
         return f"""
 <blockquote expandable>╔══════════════════════╗
    🎉 <b>ПОБЕДА!</b> 🎉
@@ -375,13 +438,13 @@ def format_game_result(game, win_amount, is_win=False):
 
 <blockquote>
 <b>💰 Результат:</b>
-├ 💸Ставка: <b>{game.bet_amount}₽</b>
-├ 🍀Выигрыш: <b>{round(win_amount, 2)}₽</b>
-└ 📌Множитель: <b>x{game.multiplier:.2f}</b>
+├ 💸Ставка: <b>{bet_amount}₽</b>
+├ 🍀Выигрыш: <b>{win_amount}₽</b>
+└ 📌Множитель: <b>x{current_mult:.2f}</b>
 
 <b>📊 Статистика:</b>
-├ Открыто ячеек: <b>{game.opened_cells}</b>
-└ Всего мин💣: <b>{game.mines_count}</b>
+├ Открыто ячеек: <b>{opened_cells}</b>
+└ Всего мин💣: <b>{mines_count}</b>
 </blockquote>
 
 <i>Отличная игра! Поздравляем с победой! 🥳</i>
@@ -394,12 +457,12 @@ def format_game_result(game, win_amount, is_win=False):
 
 <blockquote>
 <b>💰 Результат:</b>
-├ 💸Ставка: <b>{game.bet_amount}₽</b>
-├ 📉Потеряно: <b>{game.bet_amount}₽</b>
-└ 📌Множитель: <b>x{game.multiplier:.2f}</b>
+├ 💸Ставка: <b>{bet_amount}₽</b>
+├ 📉Потеряно: <b>{bet_amount}₽</b>
+└ 📌Множитель: <b>x{current_mult:.2f}</b>
 
 <b>📊 Статистика:</b>
-├ Открыто ячеек: <b>{game.opened_cells}</b>
+├ Открыто ячеек: <b>{opened_cells}</b>
 └ Попал на мину: <b>💣</b>
 </blockquote>
 
@@ -655,7 +718,13 @@ def register_mines_handlers(bot_instance):
         try:
             user_id = str(message.from_user.id)
 
-            bet_amount = float(message.text)
+            # Валидация и очистка ввода
+            bet_text = message.text.strip()
+            
+            # Удаление валюты и пробелов
+            bet_text = bet_text.replace('₽', '').replace(' ', '').replace(',', '.')
+            
+            bet_amount = float(bet_text)
 
             if bet_amount < MIN_BET:
                 bot.send_message(message.chat.id, f"❌ Минимальная ставка: {MIN_BET}₽")
@@ -664,6 +733,8 @@ def register_mines_handlers(bot_instance):
             if bet_amount > MAX_BET:
                 bot.send_message(message.chat.id, f"❌ Максимальная ставка: {MAX_BET}₽")
                 return
+            
+            bet_amount = round(bet_amount, 2)
 
             users_data = load_users_data()
             
@@ -793,11 +864,34 @@ def register_mines_handlers(bot_instance):
         try:
             user_id = str(call.from_user.id)
 
+            # Валидация callback_data для предотвращения injection
+            if not call.data or len(call.data) > 100:
+                logging.warning(f"Подозрительный callback_data от {user_id}")
+                return
+            
+            allowed_prefixes = ['mine_bet_', 'mine_custom_bet', 'mine_mines_', 'mine_custom_mines',
+                              'mine_cell_', 'mine_cashout', 'mine_ignore']
+            
+            if not any(call.data.startswith(prefix) or call.data == prefix.rstrip('_') for prefix in allowed_prefixes):
+                logging.warning(f"Неизвестный callback: {call.data} от {user_id}")
+                return
             
             action_key = ""
             if call.data.startswith("mine_cell_"):
                 parts = call.data.split("_")
-                x, y = int(parts[2]), int(parts[3])
+                if len(parts) != 4:
+                    logging.warning(f"Некорректный формат mine_cell от {user_id}")
+                    return
+                try:
+                    x, y = int(parts[2]), int(parts[3])
+                    # Валидация диапазонов
+                    if not (0 <= x < 5) or not (0 <= y < 5):
+                        logging.warning(f"Некорректные координаты mine_cell от {user_id}")
+                        return
+                    action_key = f"cell_{x}_{y}"
+                except (ValueError, IndexError):
+                    logging.warning(f"Ошибка парсинга mine_cell от {user_id}")
+                    return
                 action_key = f"cell_{x}_{y}"
             elif call.data == "mine_cashout":
                 action_key = "cashout"
@@ -820,6 +914,30 @@ def register_mines_handlers(bot_instance):
             mark_action_processing(user_id, action_key)
 
             if call.data.startswith("mine_bet_"):
+                # Валидация суммы ставки
+                try:
+                    bet_str = call.data.split("_")[2]
+                    bet_amount = float(bet_str)
+                    
+                    if bet_amount < MIN_BET or bet_amount > MAX_BET:
+                        try:
+                            bot.answer_callback_query(
+                                call.id, 
+                                f"❌ Ставка должна быть от {MIN_BET}₽ до {MAX_BET}₽",
+                                show_alert=True
+                            )
+                        except:
+                            pass
+                        clear_action_processing(user_id, action_key)
+                        return
+                except (ValueError, IndexError):
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Некорректная сумма ставки", show_alert=True)
+                    except:
+                        pass
+                    clear_action_processing(user_id, action_key)
+                    return
+                
                 with mines_lock:
                     if user_id in active_games:
                         game = active_games[user_id]
@@ -871,7 +989,25 @@ def register_mines_handlers(bot_instance):
                 return
 
             elif call.data.startswith("mine_count_"):
-                mines_count = int(call.data.split("_")[2])
+                # Валидация количества мин
+                try:
+                    mines_str = call.data.split("_")[2]
+                    mines_count = int(mines_str)
+                    
+                    if mines_count < 2 or mines_count > 24:
+                        try:
+                            bot.answer_callback_query(call.id, "❌ Количество мин должно быть от 2 до 24", show_alert=True)
+                        except:
+                            pass
+                        clear_action_processing(user_id, action_key)
+                        return
+                except (ValueError, IndexError):
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Некорректное количество мин", show_alert=True)
+                    except:
+                        pass
+                    clear_action_processing(user_id, action_key)
+                    return
 
                 with mines_lock:
                     if user_id in active_games:
@@ -1023,6 +1159,7 @@ def register_mines_handlers(bot_instance):
                 return
 
             if call.data.startswith("mine_cell_"):
+                # Используем уже провалидированные значения из начала функции
                 parts = call.data.split("_")
                 x, y = int(parts[2]), int(parts[3])
 
@@ -1046,7 +1183,17 @@ def register_mines_handlers(bot_instance):
                     
                     game.last_action_time = current_time
                     
-                    success = game.reveal_cell(x, y)
+                    # Обработка с try-except для валидационных ошибок
+                    try:
+                        success = game.reveal_cell(x, y)
+                    except ValueError as e:
+                        logging.error(f"Ошибка валидации в reveal_cell: {e}")
+                        try:
+                            bot.answer_callback_query(call.id, "❌ Ошибка обработки хода", show_alert=True)
+                        except:
+                            pass
+                        clear_action_processing(user_id, action_key)
+                        return
 
                     if not success:
                         users_data = load_users_data()
@@ -1243,4 +1390,3 @@ def get_active_games():
             'chat_id': game.chat_id,
             'message_id': game.message_id
         } for user_id, game in active_games.items()}
-
