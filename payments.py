@@ -22,7 +22,7 @@ except ImportError:
         return False
 
 CRYPTOBOT_TOKEN = "477733:AAzooy5vcnCpJuGgTZc1Rdfbu71bqmrRMgr"
-ADMIN_ID = "8118184388"
+ADMIN_IDS = ["8118184388", "8115654734"]
 NOTIFICATION_GROUP_ID = "-1003647626166"
 WITHDRAW_IMAGE_URL = "https://iimg.su/i/2GviVX"
 DEPOSIT_IMAGE_URL = "https://iimg.su/i/3yvm27"
