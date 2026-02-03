@@ -950,6 +950,14 @@ Flame Game - это современная игровая
         else:
             bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
 
+    elif is_games_command(text):
+        bot.send_message(
+            message.chat.id,
+            get_games_info(),
+            parse_mode='HTML',
+            reply_markup=main_menu()
+        )
+
     else:
         bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
 
@@ -1001,6 +1009,3 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
-
-
-
