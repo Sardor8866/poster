@@ -456,10 +456,10 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
         
         if bet_type in ["мимо", "miss"] and result == "miss":
             win = True
-            multiplier = 2.0
+            multiplier = 1.9
         elif bet_type in ["гол", "goal"] and result in ["goal", "three"]:
             win = True
-            multiplier = 2.0
+            multiplier = 1.9
         elif bet_type in ["3-очковый", "three", "тройка"] and result == "three":
             win = True
             multiplier = 3.0
@@ -554,10 +554,10 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
 
         if bet_type == "miss" and result == "miss":
             win = True
-            multiplier = 2.0
+            multiplier = 1.9
         elif bet_type == "goal" and result in ["goal", "three"]:
             win = True
-            multiplier = 2.0
+            multiplier = 1.9
         elif bet_type == "three" and result == "three":
             win = True
             multiplier = 3.0
@@ -724,7 +724,7 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
         
         if bet_type in ["мимо", "miss"] and result == "miss":
             win = True
-            multiplier = 1.8
+            multiplier = 1.7
         elif bet_type in ["гол", "goal"] and result == "goal":
             win = True
             multiplier = 1.4
@@ -816,7 +816,7 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
         if bet_type == "miss" and result == "miss":
             win = True
-            multiplier = 1.8
+            multiplier = 1.7
         elif bet_type == "goal" and result == "goal":
             win = True
             multiplier = 1.4
@@ -984,10 +984,10 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         bet_type_name = get_darts_bet_name_chat(bet_type)
         
         multipliers = {
-            "miss": 2.5,
-            "red": 1.8,
-            "white": 1.8,
-            "bullseye": 4.3
+            "miss": 2.35,
+            "red": 1.85,
+            "white": 1.85,
+            "bullseye": 3.75
         }
         
         if bet_type in ["мимо", "miss"] and result == "miss":
@@ -1093,10 +1093,10 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
         win = False
         multipliers = {
-            "miss": 2.5,
-            "red": 1.8,
-            "white": 1.8,
-            "bullseye": 4.3
+            "miss": 2.35,
+            "red": 1.85,
+            "white": 1.85,
+            "bullseye": 3.75
         }
 
         if bet_type == "red" and result in ["red", "bullseye"]:
@@ -2027,4 +2027,5 @@ def register_games_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
             except:
                 pass
+
 
