@@ -464,6 +464,32 @@ def balance_command(message):
         reply_to_message_id=message.message_id
     )
 
+@bot.message_handler(commands=['games', 'игры'])
+def games_command(message):
+    users_data = load_users_data()
+    user_id = str(message.from_user.id)
+
+    if user_id not in users_data:
+        bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
+        return
+
+    balance_text, markup = games_inline_menu(user_id)
+
+    games_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   🎮 <b>FLAME GAMES</b> 🎮
+╚══════════════════════╝</blockquote>
+
+{balance_text}
+"""
+    bot.send_message(
+        message.chat.id,
+        games_text,
+        parse_mode='HTML',
+        reply_markup=markup,
+        reply_to_message_id=message.message_id
+    )
+
 @bot.message_handler(func=lambda message: message.text and message.text.lower() in ['профиль', 'профил', '/профиль', '/profile', 'profile'])
 def profile_command(message):
     users_data = load_users_data()
@@ -657,7 +683,7 @@ def pay_command(message):
 
 @bot.message_handler(content_types=['text'])
 def menu_handler(message):
-    # Для чатов обрабатываем только команды баланса
+    # Для чатов обрабатываем только команды баланса и игр
     if not is_private_chat(message):
         text = message.text.strip().lower()
         user = message.from_user
@@ -687,6 +713,28 @@ def menu_handler(message):
                 )
             else:
                 bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту")
+        
+        elif text in ['games', 'игры', '/games', '/игры']:
+            if user_id in users_data:
+                balance_text, markup = games_inline_menu(user_id)
+
+                games_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   🎮 <b>FLAME GAMES</b> 🎮
+╚══════════════════════╝</blockquote>
+
+{balance_text}
+"""
+                bot.send_message(
+                    message.chat.id,
+                    games_text,
+                    parse_mode='HTML',
+                    reply_markup=markup,
+                    reply_to_message_id=message.message_id
+                )
+            else:
+                bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту")
+        
         return
 
     # Для личных сообщений обрабатываем полное меню
@@ -872,7 +920,7 @@ Flame Game - это современная игровая
 """
         bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_markup=main_menu())
 
-    elif text == "🎮 Игры":
+    elif text == "🎮 Игры" or text.strip().lower() in ['games', 'игры']:
         balance_text, markup = games_inline_menu(user_id)
 
         games_text = f"""
@@ -1000,6 +1048,3 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
-
-
-
