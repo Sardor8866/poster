@@ -930,11 +930,8 @@ Flame Game - это современная игровая
 """
             bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_to_message_id=message.message_id)
 
-        # Игры (меню с кнопками) — все варианты: /games, games, /игры, игры, и т.д.
-        elif text == "🎮 Игры" or text_lower in [
-            '/games', 'games', '/игры', 'игры',
-            '/game',  'game',  '/игра', 'игра'
-        ]:
+        # Игры (меню с кнопками) — только нажатие кнопки клавиатуры
+        elif text == "🎮 Игры":
             if user_id not in users_data:
                 bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
                 return
@@ -952,6 +949,18 @@ Flame Game - это современная игровая
                 games_text,
                 parse_mode='HTML',
                 reply_markup=markup,
+                reply_to_message_id=message.message_id
+            )
+
+        # Справка по играм (текстовые команды)
+        elif text_lower in [
+            '/games', 'games', '/игры', 'игры',
+            '/game',  'game',  '/игра', 'игра'
+        ]:
+            bot.send_message(
+                message.chat.id,
+                get_games_info(),
+                parse_mode='HTML',
                 reply_to_message_id=message.message_id
             )
 
@@ -1140,10 +1149,7 @@ Flame Game - это современная игровая
 """
         bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_markup=main_menu())
 
-    elif text == "🎮 Игры" or text.strip().lower() in [
-        '/games', 'games', '/игры', 'игры',
-        '/game',  'game',  '/игра', 'игра'
-    ]:
+    elif text == "🎮 Игры":
         balance_text, markup = games_inline_menu(user_id)
 
         games_text = f"""
@@ -1158,6 +1164,18 @@ Flame Game - это современная игровая
             games_text,
             parse_mode='HTML',
             reply_markup=markup
+        )
+
+    # Справка по играм (текстовые команды)
+    elif text.strip().lower() in [
+        '/games', 'games', '/игры', 'игры',
+        '/game',  'game',  '/игра', 'игра'
+    ]:
+        bot.send_message(
+            message.chat.id,
+            get_games_info(),
+            parse_mode='HTML',
+            reply_markup=main_menu()
         )
 
     elif text in ["🎲 Кости", "🏀 Баскетбол", "⚽ Футбол", "🎯 Дартс"]:
