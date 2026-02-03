@@ -41,6 +41,7 @@ from referrals import register_referrals_handlers, add_referral_bonus, process_r
 from admin_panel import register_admin_handlers
 from games import register_games_handlers
 from bonus_system import register_bonus_handlers
+from helper import get_games_info, is_games_command
 
 try:
     from payments import register_crypto_handlers
@@ -1000,5 +1001,6 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
+
 
 
