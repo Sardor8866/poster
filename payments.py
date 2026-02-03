@@ -21,9 +21,9 @@ except ImportError:
         logging.warning(f"Модуль лидеров не найден, транзакция не записана в историю: {user_id}")
         return False
 
-CRYPTOBOT_TOKEN = "477733:AAzooy5vcnCpJuGgTZc1Rdfbu71bqmrRMgr"
+CRYPTOBOT_TOKEN = "526036:AAmCKe81iaKXe5Js1BkxpwJ4ZKrPTWqPB0v"
 ADMIN_IDS = ["8118184388", "8115654734"]
-NOTIFICATION_GROUP_ID = "-1003647626166"
+NOTIFICATION_GROUP_ID = "-5194962423"
 WITHDRAW_IMAGE_URL = "https://iimg.su/i/2GviVX"
 DEPOSIT_IMAGE_URL = "https://iimg.su/i/3yvm27"
 MIN_DEPOSIT_RUB = 10
