@@ -721,14 +721,16 @@ def pay_command(message):
 
 @bot.message_handler(content_types=['text'])
 def menu_handler(message):
-    # Для чатов обрабатываем только команды баланса
+    # Для чатов обрабатываем команды без ReplyKeyboard
     if not is_private_chat(message):
-        text = message.text.strip().lower()
+        text = message.text.strip()
+        text_lower = text.lower()
         user = message.from_user
         user_id = str(user.id)
         users_data = load_users_data()
-        
-        if text in ['бал', 'баланс', 'balance', '/бал', '/баланс', '/balance']:
+
+        # Баланс
+        if text_lower in ['бал', 'баланс', 'balance', '/бал', '/баланс', '/balance']:
             if user_id in users_data:
                 user_info = users_data[user_id]
                 balance = user_info.get('balance', 0)
@@ -750,7 +752,209 @@ def menu_handler(message):
                     reply_to_message_id=message.message_id
                 )
             else:
-                bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту")
+                bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
+
+        # Профиль
+        elif text == "❄️ Профиль" or text_lower in ['профиль', 'профил', '/профиль', '/profile', 'profile']:
+            if user_id not in users_data:
+                bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
+            else:
+                user_info = users_data[user_id]
+                username = user.username if user.username else user.first_name
+                balance = user_info.get('balance', 0)
+                balance_rounded = round(balance, 2)
+                first_seen = datetime.fromisoformat(user_info['first_seen'])
+                days_in_project = (datetime.now() - first_seen).days
+                total_deposits = user_info.get('total_deposits', 0)
+                total_withdrawals = user_info.get('total_withdrawals', 0)
+                avatar_file_id = get_user_avatar(user.id)
+
+                profile_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   ❄️ <b>FESTERY PROFILE</b> ❄️
+╚══════════════════════╝</blockquote>
+
+<b>👤 Игрок:</b> @{username}
+<b>🆔 ID:</b> <code>{user_id}</code>
+━━━━━━━━━━━━━━━━━━━━
+<b>💰 Баланс:</b> <code>{balance_rounded}₽</code>
+<b>📥 Депозиты:</b> <code>{total_deposits}₽</code>
+<b>📤 Выводы:</b> <code>{total_withdrawals}₽</code>
+━━━━━━━━━━━━━━━━━━━━
+<b>📅 В проекте:</b> {days_in_project} дней
+"""
+                markup = types.InlineKeyboardMarkup(row_width=2)
+                if PAYMENTS_ENABLED:
+                    markup.row(
+                        types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
+                        types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
+                    )
+                else:
+                    markup.row(
+                        types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
+                        types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
+                    )
+
+                if avatar_file_id:
+                    try:
+                        bot.send_photo(
+                            message.chat.id,
+                            photo=avatar_file_id,
+                            caption=profile_text,
+                            reply_markup=markup,
+                            parse_mode='HTML',
+                            reply_to_message_id=message.message_id
+                        )
+                    except Exception as e:
+                        print(f"Ошибка отправки фото: {e}")
+                        bot.send_message(
+                            message.chat.id,
+                            profile_text,
+                            reply_markup=markup,
+                            parse_mode='HTML',
+                            reply_to_message_id=message.message_id
+                        )
+                else:
+                    bot.send_message(
+                        message.chat.id,
+                        profile_text,
+                        reply_markup=markup,
+                        parse_mode='HTML',
+                        reply_to_message_id=message.message_id
+                    )
+
+        # Рефералы
+        elif text == "👥 Рефералы" or text_lower in ['/рефералы', 'рефералы']:
+            try:
+                if user_id not in users_data:
+                    bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
+                    return
+
+                user_info = users_data[user_id]
+                referral_bonus_balance = user_info.get('referral_bonus', 0)
+                total_referral_income = user_info.get('total_referral_income', 0)
+                referral_count = len(user_info.get('referrals', []))
+
+                try:
+                    bot_info = bot.get_me()
+                    BOT_USERNAME = bot_info.username
+                except:
+                    BOT_USERNAME = "YOUR_BOT_USERNAME"
+
+                referral_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+
+                markup = types.InlineKeyboardMarkup(row_width=1)
+                withdraw_text = "💸 Вывести на баланс"
+                if referral_bonus_balance < 300:
+                    withdraw_text = f"💸 Вывести на баланс (нужно {300-referral_bonus_balance}₽)"
+
+                markup.add(
+                    types.InlineKeyboardButton(withdraw_text, callback_data="withdraw_referral"),
+                    types.InlineKeyboardButton("📋 Мои рефералы", callback_data="my_referrals"),
+                    types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}")
+                )
+
+                referral_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   👥 <b>РЕФЕРАЛЬНАЯ СИСТЕМА</b> 👥
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+<b>💰 РЕФЕРАЛЬНЫЙ БАЛАНС:</b>
+├ 💎 Доступно: <b>{referral_bonus_balance}₽</b>
+├ 🎯 Всего рефералов: <b>{referral_count}</b>
+├ 📊 Всего получено: <b>{total_referral_income}₽</b>
+└ 🎯 Процент: <b>6%</b> от выигрышных ставок
+</blockquote>
+
+<blockquote>
+<b>🔗 ВАША РЕФЕРАЛЬНАЯ ССЫЛКА:</b>
+<code>{referral_link}</code>
+</blockquote>
+
+<blockquote>
+<b>🎯 УСЛОВИЯ ВЫВОДА:</b>
+├ 💸 Минимальная сумма: <b>300₽</b>
+├ ⚡ Вывод в любой момент
+└ 🔄 На основной баланс
+</blockquote>
+
+<b>⚠️ Для вывода нажмите кнопку "💸 Вывести на баланс"</b>
+"""
+                bot.send_message(
+                    message.chat.id,
+                    referral_text,
+                    parse_mode='HTML',
+                    reply_markup=markup,
+                    reply_to_message_id=message.message_id
+                )
+            except Exception as e:
+                print(f"Ошибка при показе рефералов: {e}")
+                bot.send_message(message.chat.id, "❌ Ошибка при загрузке реферальной системы", reply_to_message_id=message.message_id)
+
+        # ТОП Игроков
+        elif text == "🏆 ТОП Игроков" or text_lower in ['/топ', 'топ']:
+            from leaders import show_leaders
+            show_leaders(bot, message)
+
+        # О проекте
+        elif text == "ℹ️ О проекте" or text_lower in ['/о проекте', 'о проекте']:
+            info_text = """
+<blockquote expandable>╔══════════════════════╗
+   ❄️ <b>FESTERY GAME</b> ❄️
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+<b>🌟 О ПРОЕКТЕ:</b>
+Flame Game - это современная игровая
+платформа с уникальными механиками
+и честной монетизацией.
+
+<b>🎮 НАША МИССИЯ:</b>
+Создать лучшее игровое сообщество
+где каждый может проявить себя
+и заработать на своих навыках.
+
+<b>💎 ПРЕИМУЩЕСТВА:</b>
+├ 🔥 Быстрые выплаты
+├ 💫 Честные игры
+├ 🚀 Современный дизайн
+└ 👥 Активное сообщество
+
+<b>🔒 БЕЗОПАСНОСТЬ:</b>
+Все транзакции защищены
+Ваши данные в безопасности
+</blockquote>
+
+<i>❄️ Присоединяйся к Festery Game сегодня!</i>
+"""
+            bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_to_message_id=message.message_id)
+
+        # Игры (меню с кнопками) — все варианты: /games, games, /игры, игры, и т.д.
+        elif text == "🎮 Игры" or text_lower in [
+            '/games', 'games', '/игры', 'игры',
+            '/game',  'game',  '/игра', 'игра'
+        ]:
+            if user_id not in users_data:
+                bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
+                return
+
+            balance_text, markup = games_inline_menu(user_id)
+            games_text = f"""
+<blockquote expandable>╔══════════════════════╗
+   🎮 <b>FLAME GAMES</b> 🎮
+╚══════════════════════╝</blockquote>
+
+{balance_text}
+"""
+            bot.send_message(
+                message.chat.id,
+                games_text,
+                parse_mode='HTML',
+                reply_markup=markup,
+                reply_to_message_id=message.message_id
+            )
+
         return
 
     # Для личных сообщений обрабатываем полное меню
@@ -936,7 +1140,10 @@ Flame Game - это современная игровая
 """
         bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_markup=main_menu())
 
-    elif text == "🎮 Игры":
+    elif text == "🎮 Игры" or text.strip().lower() in [
+        '/games', 'games', '/игры', 'игры',
+        '/game',  'game',  '/игра', 'игра'
+    ]:
         balance_text, markup = games_inline_menu(user_id)
 
         games_text = f"""
@@ -1012,14 +1219,6 @@ Flame Game - это современная игровая
             )
         else:
             bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
-
-    elif is_games_command(text):
-        bot.send_message(
-            message.chat.id,
-            get_games_info(),
-            parse_mode='HTML',
-            reply_markup=main_menu()
-        )
 
     else:
         bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
