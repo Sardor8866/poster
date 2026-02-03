@@ -16,28 +16,6 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ИСПРАВЛЕНИЕ: Добавляем глобальную блокировку для безопасной работы с файлами
-file_lock = threading.Lock()
-user_locks = {}
-
-def get_user_lock(user_id):
-    """Получение блокировки для конкретного пользователя"""
-    if user_id not in user_locks:
-        user_locks[user_id] = threading.Lock()
-    return user_locks[user_id]
-
-def validate_amount(amount, min_amount=0, max_amount=1000000):
-    """Валидация суммы"""
-    try:
-        amount = float(amount)
-        if amount < min_amount or amount > max_amount:
-            return None
-        if amount != amount:  # проверка на NaN
-            return None
-        return round(amount, 2)
-    except:
-        return None
-
 active_bets = {}
 last_click_time = {}
 bet_lock = threading.Lock()
@@ -45,7 +23,7 @@ active_games = {}
 game_session_tokens = {}
 
 MIN_BET_DICE = 1
-MIN_BET_OTHER = 1
+MIN_BET_OTHER = 25
 MAX_BET = float('inf')
 
 def get_min_bet(game_type):
@@ -74,10 +52,8 @@ def rate_limit(user_id):
 def load_users_data():
     """Загрузка данных пользователей"""
     try:
-        # ИСПРАВЛЕНИЕ: Используем блокировку при чтении
-        with file_lock:
-            with open('users_data.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
+        with open('users_data.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError:
@@ -90,10 +66,8 @@ def load_users_data():
 def save_users_data(data):
     """Сохранение данных пользователей"""
     try:
-        # ИСПРАВЛЕНИЕ: Используем блокировку при записи
-        with file_lock:
-            with open('users_data.json', 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+        with open('users_data.json', 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
         logging.error(f"Ошибка сохранения данных: {e}")
@@ -105,12 +79,6 @@ def add_referral_bonus(user_id, win_amount):
     ВАЖНОЕ ИСПРАВЛЕНИЕ: Делаем начисление БЕЗОПАСНЫМ
     """
     try:
-        # ИСПРАВЛЕНИЕ: Валидация суммы выигрыша
-        win_amount = validate_amount(win_amount, min_amount=0.01)
-        if win_amount is None:
-            logging.error(f"Некорректная сумма выигрыша: {win_amount}")
-            return False
-            
         users_data = load_users_data()
         
         if user_id not in users_data:
@@ -137,40 +105,32 @@ def add_referral_bonus(user_id, win_amount):
         logging.info(f"Выигрыш: {win_amount}₽")
         logging.info(f"Бонус (6%): {bonus}₽")
 
-        # ИСПРАВЛЕНИЕ: Используем блокировку для реферера
-        referrer_lock = get_user_lock(referrer_id)
+        users_data = load_users_data()
         
-        with referrer_lock:
-            users_data = load_users_data()
-            
-            if referrer_id not in users_data:
-                logging.error(f"Реферер {referrer_id} не найден после блокировки")
-                return False
-            
-            old_bonus = users_data[referrer_id].get('referral_bonus', 0)
-            old_total = users_data[referrer_id].get('total_referral_income', 0)
-            
-            logging.info(f"Было у реферера: баланс={old_bonus}₽, всего={old_total}₽")
+        old_bonus = users_data[referrer_id].get('referral_bonus', 0)
+        old_total = users_data[referrer_id].get('total_referral_income', 0)
+        
+        logging.info(f"Было у реферера: баланс={old_bonus}₽, всего={old_total}₽")
 
-            users_data[referrer_id]['referral_bonus'] = round(old_bonus + bonus, 2)
-            users_data[referrer_id]['total_referral_income'] = round(old_total + bonus, 2)
+        users_data[referrer_id]['referral_bonus'] = round(old_bonus + bonus, 2)
+        users_data[referrer_id]['total_referral_income'] = round(old_total + bonus, 2)
 
-            if save_users_data(users_data):
-                check_data = load_users_data()
-                if referrer_id in check_data:
-                    new_bonus = check_data[referrer_id].get('referral_bonus', 0)
-                    new_total = check_data[referrer_id].get('total_referral_income', 0)
-                    
-                    logging.info(f"Стало у реферера: баланс={new_bonus}₽, всего={new_total}₽")
-                    logging.info(f"Успешно! Разница: +{new_bonus - old_bonus}₽")
-                    logging.info(f"=== НАЧИСЛЕНИЕ ЗАВЕРШЕНО ===")
-                    return True
-                else:
-                    logging.error(f"Реферер {referrer_id} не найден после сохранения")
-                    return False
+        if save_users_data(users_data):
+            check_data = load_users_data()
+            if referrer_id in check_data:
+                new_bonus = check_data[referrer_id].get('referral_bonus', 0)
+                new_total = check_data[referrer_id].get('total_referral_income', 0)
+                
+                logging.info(f"Стало у реферера: баланс={new_bonus}₽, всего={new_total}₽")
+                logging.info(f"Успешно! Разница: +{new_bonus - old_bonus}₽")
+                logging.info(f"=== НАЧИСЛЕНИЕ ЗАВЕРШЕНО ===")
+                return True
             else:
-                logging.error("Ошибка сохранения данных")
+                logging.error(f"Реферер {referrer_id} не найден после сохранения")
                 return False
+        else:
+            logging.error("Ошибка сохранения данных")
+            return False
 
     except Exception as e:
         logging.error(f"Ошибка в add_referral_bonus: {e}", exc_info=True)
@@ -224,37 +184,10 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             bot.reply_to(message, "❌ Недостаточно средств!")
             return
         
-        # ИСПРАВЛЕНИЕ: Используем блокировку при списании ставки
-        user_lock = get_user_lock(user_id)
-        with user_lock:
-            users_data = load_users_data()
-            balance = users_data[user_id].get('balance', 0)
-            if bet_amount > balance:
-                bot.reply_to(message, "❌ Недостаточно средств!")
-                return
-            
-
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя при списании ставки
-
-            user_lock = get_user_lock(user_id)
-
-            with user_lock:
-
-                users_data = load_users_data()
-
-                balance = users_data[user_id].get('balance', 0)
-
-                if bet_amount > balance:
-
-                    bot.reply_to(message, "❌ Недостаточно средств!")
-
-                    return
-
-                users_data[user_id]['balance'] = round(balance - bet_amount, 2)
-
-                save_users_data(users_data)
+        users_data[user_id]['balance'] = round(balance - bet_amount, 2)
+        save_users_data(users_data)
         
-        dice_msg = bot.send_dice(message.chat.id, emoji='🎲')
+        dice_msg = bot.send_dice(message.chat.id, emoji='🎲', reply_to_message_id=message.message_id)
         
         time.sleep(3)
         
@@ -277,23 +210,10 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         
         if win:
             win_amount = round(bet_amount * multiplier, 2)
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-            user_lock = get_user_lock(user_id)
-            with user_lock:
-                users_data = load_users_data()
-                # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-
-                user_lock = get_user_lock(user_id)
-
-                with user_lock:
-
-                    users_data = load_users_data()
-
-                    current_balance = users_data[user_id].get('balance', 0)
-
-                    users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
-
-                    save_users_data(users_data)
+            users_data = load_users_data()
+            current_balance = users_data[user_id].get('balance', 0)
+            users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
+            save_users_data(users_data)
             
             try:
                 add_game_to_history(
@@ -309,9 +229,6 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             logging.info(f"🎲 Кости (чат): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
             
-            # Перезагружаем данные для отображения актуального баланса
-            users_data = load_users_data()
-            
             result_text = f"""<b>🎲 Кости</b>
 
 🎮 Игрок: @{username if username else user_id}
@@ -323,7 +240,6 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
         else:
-            # ИСПРАВЛЕНИЕ: Просто загружаем актуальные данные, баланс уже списан
             users_data = load_users_data()
             
             try:
@@ -384,23 +300,9 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
         if win:
             win_amount = round(bet_amount * multiplier, 2)
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-            user_lock = get_user_lock(user_id)
-            with user_lock:
-                users_data = load_users_data()
-                # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-
-                user_lock = get_user_lock(user_id)
-
-                with user_lock:
-
-                    users_data = load_users_data()
-
-                    current_balance = users_data[user_id].get('balance', 0)
-
-                    users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
-
-                    save_users_data(users_data)
+            current_balance = users_data[user_id].get('balance', 0)
+            users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
+            save_users_data(users_data)
             
             try:
                 add_game_to_history(
@@ -416,9 +318,6 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
             logging.info(f"🎲 Кости (инлайн): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             success = add_referral_bonus(user_id, win_amount)
             logging.info(f"Результат начисления: {'УСПЕХ' if success else 'ОШИБКА'}")
-            
-            # Перезагружаем данные для отображения актуального баланса
-            users_data = load_users_data()
 
             result_text = f"""<b>🎲 Кости</b>
 
@@ -430,8 +329,8 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
         else:
-            # ИСПРАВЛЕНИЕ: Не нужно изменять баланс при проигрыше (уже списан)
-            users_data = load_users_data()
+            users_data[user_id]['balance'] = round(users_data[user_id].get('balance', 0), 2)
+            save_users_data(users_data)
 
             try:
                 add_game_to_history(
@@ -536,29 +435,10 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
             bot.reply_to(message, "❌ Недостаточно средств!")
             return
         
+        users_data[user_id]['balance'] = round(balance - bet_amount, 2)
+        save_users_data(users_data)
         
-
-        # ИСПРАВЛЕНИЕ: Используем блокировку пользователя при списании ставки
-
-        user_lock = get_user_lock(user_id)
-
-        with user_lock:
-
-            users_data = load_users_data()
-
-            balance = users_data[user_id].get('balance', 0)
-
-            if bet_amount > balance:
-
-               bot.reply_to(message, "❌ Недостаточно средств!")
-
-               return
-
-            users_data[user_id]['balance'] = round(balance - bet_amount, 2)
-
-            save_users_data(users_data)
-        
-        basketball_msg = bot.send_dice(message.chat.id, emoji='🏀')
+        basketball_msg = bot.send_dice(message.chat.id, emoji='🏀', reply_to_message_id=message.message_id)
         
         time.sleep(3)
         
@@ -589,19 +469,9 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             users_data = load_users_data()
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-
-            user_lock = get_user_lock(user_id)
-
-            with user_lock:
-
-                users_data = load_users_data()
-
-                current_balance = users_data[user_id].get('balance', 0)
-
-                users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
-
-                save_users_data(users_data)
+            current_balance = users_data[user_id].get('balance', 0)
+            users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
+            save_users_data(users_data)
             
             try:
                 add_game_to_history(
@@ -616,9 +486,6 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
             
             logging.info(f"🏀 Баскетбол (чат): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
-            
-            # Перезагружаем данные для отображения актуального баланса
-            users_data = load_users_data()
             
             result_text = f"""<b>🏀 Баскетбол</b>
 
@@ -699,19 +566,9 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
 
         if win:
             win_amount = round(bet_amount * multiplier, 2)
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-
-            user_lock = get_user_lock(user_id)
-
-            with user_lock:
-
-                users_data = load_users_data()
-
-                current_balance = users_data[user_id].get('balance', 0)
-
-                users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
-
-                save_users_data(users_data)
+            current_balance = users_data[user_id].get('balance', 0)
+            users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
+            save_users_data(users_data)
             
             try:
                 add_game_to_history(
@@ -726,9 +583,6 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
             
             logging.info(f"🏀 Баскетбол (инлайн): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
-            
-            # Перезагружаем данные для отображения актуального баланса
-            users_data = load_users_data()
 
             result_text = f"""<b>🏀 Баскетбол</b>
 
@@ -851,29 +705,10 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
             bot.reply_to(message, "❌ Недостаточно средств!")
             return
         
+        users_data[user_id]['balance'] = round(balance - bet_amount, 2)
+        save_users_data(users_data)
         
-
-        # ИСПРАВЛЕНИЕ: Используем блокировку пользователя при списании ставки
-
-        user_lock = get_user_lock(user_id)
-
-        with user_lock:
-
-            users_data = load_users_data()
-
-            balance = users_data[user_id].get('balance', 0)
-
-            if bet_amount > balance:
-
-                bot.reply_to(message, "❌ Недостаточно средств!")
-
-                return
-
-            users_data[user_id]['balance'] = round(balance - bet_amount, 2)
-
-            save_users_data(users_data)
-        
-        football_msg = bot.send_dice(message.chat.id, emoji='⚽')
+        football_msg = bot.send_dice(message.chat.id, emoji='⚽', reply_to_message_id=message.message_id)
         
         time.sleep(3.5)
         
@@ -899,19 +734,9 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             users_data = load_users_data()
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-
-            user_lock = get_user_lock(user_id)
-
-            with user_lock:
-
-                users_data = load_users_data()
-
-                current_balance = users_data[user_id].get('balance', 0)
-
-                users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
-
-                save_users_data(users_data)
+            current_balance = users_data[user_id].get('balance', 0)
+            users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
+            save_users_data(users_data)
             
             try:
                 add_game_to_history(
@@ -926,9 +751,6 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
             
             logging.info(f"⚽ Футбол (чат): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
-            
-            # Перезагружаем данные для отображения актуального баланса
-            users_data = load_users_data()
             
             result_text = f"""<b>⚽ Футбол</b>
 
@@ -1003,19 +825,9 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
         if win:
             win_amount = round(bet_amount * multiplier, 2)
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-
-            user_lock = get_user_lock(user_id)
-
-            with user_lock:
-
-                users_data = load_users_data()
-
-                current_balance = users_data[user_id].get('balance', 0)
-
-                users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
-
-                save_users_data(users_data)
+            current_balance = users_data[user_id].get('balance', 0)
+            users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
+            save_users_data(users_data)
             
             try:
                 add_game_to_history(
@@ -1030,9 +842,6 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
             
             logging.info(f"⚽ Футбол (инлайн): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
-            
-            # Перезагружаем данные для отображения актуального баланса
-            users_data = load_users_data()
 
             result_text = f"""<b>⚽ Футбол</b>
 
@@ -1153,29 +962,10 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             bot.reply_to(message, "❌ Недостаточно средств!")
             return
         
+        users_data[user_id]['balance'] = round(balance - bet_amount, 2)
+        save_users_data(users_data)
         
-
-        # ИСПРАВЛЕНИЕ: Используем блокировку пользователя при списании ставки
-
-        user_lock = get_user_lock(user_id)
-
-        with user_lock:
-
-            users_data = load_users_data()
-
-            balance = users_data[user_id].get('balance', 0)
-
-            if bet_amount > balance:
-
-                bot.reply_to(message, "❌ Недостаточно средств!")
-
-                return
-
-            users_data[user_id]['balance'] = round(balance - bet_amount, 2)
-
-            save_users_data(users_data)
-        
-        darts_msg = bot.send_dice(message.chat.id, emoji='🎯')
+        darts_msg = bot.send_dice(message.chat.id, emoji='🎯', reply_to_message_id=message.message_id)
         
         time.sleep(3)
         
@@ -1218,19 +1008,9 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         if win:
             win_amount = round(bet_amount * multiplier, 2)
             users_data = load_users_data()
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-
-            user_lock = get_user_lock(user_id)
-
-            with user_lock:
-
-                users_data = load_users_data()
-
-                current_balance = users_data[user_id].get('balance', 0)
-
-                users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
-
-                save_users_data(users_data)
+            current_balance = users_data[user_id].get('balance', 0)
+            users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
+            save_users_data(users_data)
             
             try:
                 add_game_to_history(
@@ -1245,9 +1025,6 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
             
             logging.info(f"🎯 Дартс (чат): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
-            
-            # Перезагружаем данные для отображения актуального баланса
-            users_data = load_users_data()
             
             result_text = f"""<b>🎯 Дартс</b>
 
@@ -1339,19 +1116,9 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
         if win:
             win_amount = round(bet_amount * multiplier, 2)
-            # ИСПРАВЛЕНИЕ: Используем блокировку пользователя
-
-            user_lock = get_user_lock(user_id)
-
-            with user_lock:
-
-                users_data = load_users_data()
-
-                current_balance = users_data[user_id].get('balance', 0)
-
-                users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
-
-                save_users_data(users_data)
+            current_balance = users_data[user_id].get('balance', 0)
+            users_data[user_id]['balance'] = round(current_balance + win_amount, 2)
+            save_users_data(users_data)
             
             try:
                 add_game_to_history(
@@ -1366,9 +1133,6 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
             
             logging.info(f"🎯 Дартс (инлайн): попытка начисления бонуса для {user_id}, выигрыш: {win_amount}₽")
             add_referral_bonus(user_id, win_amount)
-            
-            # Перезагружаем данные для отображения актуального баланса
-            users_data = load_users_data()
 
             result_text = f"""<b>🎯 Дартс</b>
 
@@ -1554,7 +1318,7 @@ def register_games_handlers(bot_instance):
     global bot
     bot = bot_instance
 
-    @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['чет', 'even', 'нечет', 'odd', 'больше', 'more', 'high', 'меньше', 'less', 'low']) and not message.text.startswith('/'))
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['чет', 'even', 'нечет', 'odd', 'больше', 'more', 'high', 'меньше', 'less', 'low'] and len(message.text.strip().split()) >= 2)
     def dice_no_slash_commands(message):
         try:
             text = message.text.lower()
@@ -1718,7 +1482,7 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в dice_low_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['баскетбол', 'баскет', 'basketball', 'basket']) and not message.text.startswith('/'))
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['баскетбол', 'баскет', 'basketball', 'basket'] and len(message.text.strip().split()) >= 3)
     def basketball_no_slash_commands(message):
         try:
             text = message.text.lower()
@@ -1807,7 +1571,7 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в basketball_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['футбол', 'фут', 'football', 'foot']) and not message.text.startswith('/'))
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['футбол', 'фут', 'football', 'foot'] and len(message.text.strip().split()) >= 3)
     def football_no_slash_commands(message):
         try:
             text = message.text.lower()
@@ -1893,7 +1657,7 @@ def register_games_handlers(bot_instance):
             logging.error(f"Ошибка в football_command: {e}")
             bot.reply_to(message, "❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: any(word in message.text.lower() for word in ['дартс', 'дарт', 'darts', 'dart']) and not message.text.startswith('/'))
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['дартс', 'дарт', 'darts', 'dart'] and len(message.text.strip().split()) >= 3)
     def darts_no_slash_commands(message):
         try:
             text = message.text.lower()
@@ -2108,12 +1872,7 @@ def register_games_handlers(bot_instance):
             users_data = load_users_data()
 
             if call.data.startswith("games_bet_"):
-                bet_amount_str = call.data.split("_")[2]
-                # ИСПРАВЛЕНИЕ: Валидация суммы ставки
-                bet_amount = validate_amount(bet_amount_str, min_amount=1)
-                if bet_amount is None:
-                    bot.answer_callback_query(call.id, "❌ Некорректная сумма ставки!")
-                    return
+                bet_amount = float(call.data.split("_")[2])
 
                 balance = users_data[user_id].get('balance', 0)
                 if bet_amount > balance:
@@ -2128,16 +1887,8 @@ def register_games_handlers(bot_instance):
                     active_bets[user_id]['bet_amount'] = bet_amount
                     game_type = active_bets[user_id]['game_type']
 
-                # ИСПРАВЛЕНИЕ: Используем блокировку пользователя при списании ставки
-                user_lock = get_user_lock(user_id)
-                with user_lock:
-                    users_data = load_users_data()
-                    balance = users_data[user_id].get('balance', 0)
-                    if bet_amount > balance:
-                        bot.answer_callback_query(call.id, "❌ Недостаточно средств!")
-                        return
-                    users_data[user_id]['balance'] = round(balance - bet_amount, 2)
-                    save_users_data(users_data)
+                users_data[user_id]['balance'] = round(balance - bet_amount, 2)
+                save_users_data(users_data)
 
                 session_token = generate_session_token(user_id, game_type)
                 with bet_lock:
@@ -2276,5 +2027,3 @@ def register_games_handlers(bot_instance):
                 bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
             except:
                 pass
-
-
