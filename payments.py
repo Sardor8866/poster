@@ -675,7 +675,7 @@ def register_crypto_handlers(bot):
     logging.info(f"Текущий курс: 1 USD = {current_rate} RUB")
     
     def is_admin(user_id):
-        return str(user_id) == ADMIN_ID
+        return str(user_id) in ADMIN_IDS
     
     @bot.message_handler(commands=['admin'])
     def admin_command(message):
@@ -1308,7 +1308,7 @@ def register_crypto_handlers(bot):
         try:
             user_id = str(call.from_user.id)
             
-            if user_id == ADMIN_ID:
+            if user_id in ADMIN_IDS:
                 if call.data.startswith('admin_') or call.data.startswith('withdrawal_'):
                     bot.answer_callback_query(call.id, "⚠️ Используйте команды: /check и /kazna")
                     return
@@ -1963,8 +1963,9 @@ def register_crypto_handlers(bot):
 <code>/check reject {withdrawal_id}</code> - отклонить
 """
                     
-                    bot.send_message(
-                        ADMIN_ID,
+                    for admin_id in ADMIN_IDS:
+                        bot.send_message(
+                            admin_id,
                         admin_display,
                         parse_mode='HTML'
                     )
@@ -2133,8 +2134,9 @@ def register_crypto_handlers(bot):
 <code>/check reject {withdrawal_id}</code> - отклонить
 """
                     
-                    bot.send_message(
-                        ADMIN_ID,
+                    for admin_id in ADMIN_IDS:
+                        bot.send_message(
+                            admin_id,
                         admin_display,
                         parse_mode='HTML'
                     )
