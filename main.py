@@ -33,6 +33,69 @@ def validate_amount(amount, min_amount=0, max_amount=1000000):
     except:
         return None
 
+def get_games_info():
+    """
+    помощ
+    """
+    text = """
+<blockquote>
+🎮 <b>ДОСТУПНЫЕ ИГРЫ</b>
+
+🏗 <b>Башня:</b> <code>башня [количество-мин] [сумма]</code>
+Пример: <code>башня 3 100</code>
+
+🎯 <b>Мины:</b> <code>мины [количество-мин] [сумма]</code>
+Пример: <code>мины 5 50</code>
+
+🏀 <b>Баскетбол:</b> <code>баскет [исход] [сумма]</code>
+Пример: <code>баскет гол 50</code>
+
+⚽️ <b>Футбол:</b> <code>фут [исход] [сумма]</code>
+Пример: <code>фут гол 100</code>
+
+🎯 <b>Дартс:</b> <code>дартс [исход] [сумма]</code>
+Пример: <code>дартс центр 75</code>
+
+🎲 <b>Кубик:</b> <code>[исход] [сумма]</code>
+Пример: <code>нечет 25</code>
+
+💡 Команды работают с <code>/</code> и без него
+</blockquote>
+"""
+    return text
+
+
+def is_games_command(text):
+    """
+    Проверяет, является ли текст командой для показа игр
+    
+    Args:
+        text (str): текст сообщения
+        
+    Returns:
+        bool: True если это команда для показа игр
+    """
+    if not text:
+        return False
+    
+    # Приводим к нижнему регистру и убираем пробелы
+    text = text.lower().strip()
+    
+    # Список возможных вариантов команды
+    games_commands = [
+        '/games',
+        'games',
+        '/игры',
+        'игры',
+        '/game',
+        'game',
+        '/игра',
+        'игра'
+    ]
+    
+    return text in games_commands
+
+
 from leaders import register_leaders_handlers, leaders_start
 import mines
 import tower
@@ -41,7 +104,7 @@ from referrals import register_referrals_handlers, add_referral_bonus, process_r
 from admin_panel import register_admin_handlers
 from games import register_games_handlers
 from bonus_system import register_bonus_handlers
-from helper import get_games_info, is_games_command
+
 
 try:
     from payments import register_crypto_handlers
