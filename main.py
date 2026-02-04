@@ -7,36 +7,40 @@ import os
 from flask import Flask, request, abort
 import threading
 import logging
+import math
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ИСПРАВЛЕНИЕ: Добавляем блокировки для безопасной работы с файлами
 file_lock = threading.Lock()
 user_locks = {}
 
 def get_user_lock(user_id):
-    """Получение блокировки для конкретного пользователя"""
     if user_id not in user_locks:
         user_locks[user_id] = threading.Lock()
     return user_locks[user_id]
 
 def validate_amount(amount, min_amount=0, max_amount=1000000):
-    """Валидация суммы"""
     try:
+        if isinstance(amount, str):
+            amount = amount.replace(',', '.')
+        
         amount = float(amount)
+        
+        if math.isnan(amount):
+            return None
+            
+        if math.isinf(amount):
+            return None
+            
         if amount < min_amount or amount > max_amount:
             return None
-        if amount != amount:  # проверка на NaN
-            return None
+            
         return round(amount, 2)
     except:
         return None
 
 def get_games_info():
-    """
-    помощ
-    """
     text = """
 <blockquote>
 🎮 <b>ДОСТУПНЫЕ ИГРЫ</b>
@@ -64,24 +68,12 @@ def get_games_info():
 """
     return text
 
-
 def is_games_command(text):
-    """
-    Проверяет, является ли текст командой для показа игр
-    
-    Args:
-        text (str): текст сообщения
-        
-    Returns:
-        bool: True если это команда для показа игр
-    """
     if not text:
         return False
     
-    # Приводим к нижнему регистру и убираем пробелы
     text = text.lower().strip()
     
-    # Список возможных вариантов команды
     games_commands = [
         '/games',
         'games',
@@ -95,7 +87,6 @@ def is_games_command(text):
     
     return text in games_commands
 
-
 from leaders import register_leaders_handlers, leaders_start
 import mines
 import tower
@@ -104,7 +95,6 @@ from referrals import register_referrals_handlers, add_referral_bonus, process_r
 from admin_panel import register_admin_handlers
 from games import register_games_handlers
 from bonus_system import register_bonus_handlers
-
 
 try:
     from payments import register_crypto_handlers
@@ -189,7 +179,6 @@ def payment_callback_handler(call):
     elif call.data == "withdraw":
         bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
 
-
 leaders.register_leaders_handlers(bot)
 mines.register_mines_handlers(bot)
 tower.register_tower_handlers(bot)
@@ -206,7 +195,6 @@ else:
 
 def load_users_data():
     try:
-        # ИСПРАВЛЕНИЕ: Используем блокировку при чтении
         with file_lock:
             with open('users_data.json', 'r', encoding='utf-8') as f:
                 return json.load(f)
@@ -218,7 +206,6 @@ def load_users_data():
 
 def save_users_data(data):
     try:
-        # ИСПРАВЛЕНИЕ: Используем блокировку при записи
         with file_lock:
             with open('users_data.json', 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -249,7 +236,6 @@ def games_inline_menu(user_id):
     users_data = load_users_data()
     user_info = users_data.get(user_id, {})
     balance = user_info.get('balance', 0)
-    # ИСПРАВЛЕНИЕ: Валидация баланса
     balance = validate_amount(balance, min_amount=0)
     if balance is None:
         balance = 0
@@ -339,7 +325,6 @@ def start_message(message):
                 error_msg = result.get('message', 'Неизвестная ошибка') if result else 'Ошибка обработки'
                 print(f"Не удалось обработать реферала {user_id}: {error_msg}")
 
-                # ИСПРАВЛЕНИЕ: Используем блокировку при создании пользователя
                 user_lock = get_user_lock(user_id)
                 with user_lock:
                     users_data = load_users_data()
@@ -353,7 +338,6 @@ def start_message(message):
             print(f"Существующий пользователь {user_id} не может стать рефералом")
     else:
         if is_new_user:
-            # ИСПРАВЛЕНИЕ: Используем блокировку при создании пользователя
             user_lock = get_user_lock(user_id)
             with user_lock:
                 users_data = load_users_data()
@@ -502,7 +486,6 @@ def balance_command(message):
 
     user_info = users_data[user_id]
     balance = user_info.get('balance', 0)
-    # ИСПРАВЛЕНИЕ: Валидация баланса
     balance = validate_amount(balance, min_amount=0)
     if balance is None:
         balance = 0
@@ -649,7 +632,6 @@ def pay_command(message):
 
         amount = float(numbers[0])
         
-        # ИСПРАВЛЕНИЕ: Валидация суммы
         amount = validate_amount(amount, min_amount=1, max_amount=1000)
         if amount is None:
             bot.send_message(
@@ -675,11 +657,9 @@ def pay_command(message):
             )
             return
 
-        # ИСПРАВЛЕНИЕ: Используем блокировки для обоих пользователей
         sender_lock = get_user_lock(sender_id)
         recipient_lock = get_user_lock(recipient_id)
         
-        # Блокируем в порядке ID чтобы избежать deadlock
         locks = sorted([sender_lock, recipient_lock], key=lambda x: id(x))
         
         with locks[0]:
@@ -687,6 +667,11 @@ def pay_command(message):
                 users_data = load_users_data()
                 
                 sender_balance = users_data[sender_id].get('balance', 0)
+                sender_balance = validate_amount(sender_balance, min_amount=0)
+                if sender_balance is None:
+                    sender_balance = 0
+                    users_data[sender_id]['balance'] = 0
+                
                 if sender_balance < amount:
                     bot.send_message(
                         message.chat.id,
@@ -695,8 +680,25 @@ def pay_command(message):
                     )
                     return
 
-                users_data[sender_id]['balance'] = round(sender_balance - amount, 2)
-                users_data[recipient_id]['balance'] = round(users_data[recipient_id].get('balance', 0) + amount, 2)
+                new_sender_balance = round(sender_balance - amount, 2)
+                
+                if new_sender_balance < 0:
+                    bot.send_message(
+                        message.chat.id,
+                        f"❌ Ошибка: баланс не может быть отрицательным!",
+                        reply_to_message_id=message.message_id
+                    )
+                    return
+                
+                users_data[sender_id]['balance'] = new_sender_balance
+                
+                recipient_balance = users_data[recipient_id].get('balance', 0)
+                recipient_balance = validate_amount(recipient_balance, min_amount=0)
+                if recipient_balance is None:
+                    recipient_balance = 0
+                
+                new_recipient_balance = round(recipient_balance + amount, 2)
+                users_data[recipient_id]['balance'] = new_recipient_balance
 
                 save_users_data(users_data)
 
@@ -721,7 +723,6 @@ def pay_command(message):
 
 @bot.message_handler(content_types=['text'])
 def menu_handler(message):
-    # Для чатов обрабатываем команды без ReplyKeyboard
     if not is_private_chat(message):
         text = message.text.strip()
         text_lower = text.lower()
@@ -729,7 +730,6 @@ def menu_handler(message):
         user_id = str(user.id)
         users_data = load_users_data()
 
-        # Баланс
         if text_lower in ['бал', 'баланс', 'balance', '/бал', '/баланс', '/balance']:
             if user_id in users_data:
                 user_info = users_data[user_id]
@@ -754,7 +754,6 @@ def menu_handler(message):
             else:
                 bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
 
-        # Профиль
         elif text == "❄️ Профиль" or text_lower in ['профиль', 'профил', '/профиль', '/profile', 'profile']:
             if user_id not in users_data:
                 bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
@@ -823,7 +822,6 @@ def menu_handler(message):
                         reply_to_message_id=message.message_id
                     )
 
-        # Рефералы
         elif text == "👥 Рефералы" or text_lower in ['/рефералы', 'рефералы']:
             try:
                 if user_id not in users_data:
@@ -892,12 +890,10 @@ def menu_handler(message):
                 print(f"Ошибка при показе рефералов: {e}")
                 bot.send_message(message.chat.id, "❌ Ошибка при загрузке реферальной системы", reply_to_message_id=message.message_id)
 
-        # ТОП Игроков
         elif text == "🏆 ТОП Игроков" or text_lower in ['/топ', 'топ']:
             from leaders import show_leaders
             show_leaders(bot, message)
 
-        # О проекте
         elif text == "ℹ️ О проекте" or text_lower in ['/о проекте', 'о проекте']:
             info_text = """
 <blockquote expandable>╔══════════════════════╗
@@ -930,7 +926,6 @@ Flame Game - это современная игровая
 """
             bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_to_message_id=message.message_id)
 
-        # Игры (меню с кнопками) — только нажатие кнопки клавиатуры
         elif text == "🎮 Игры":
             if user_id not in users_data:
                 bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
@@ -952,7 +947,6 @@ Flame Game - это современная игровая
                 reply_to_message_id=message.message_id
             )
 
-        # Справка по играм (текстовые команды)
         elif text_lower in [
             '/games', 'games', '/игры', 'игры',
             '/game',  'game',  '/игра', 'игра'
@@ -966,7 +960,6 @@ Flame Game - это современная игровая
 
         return
 
-    # Для личных сообщений обрабатываем полное меню
     text = message.text
     user = message.from_user
     user_id = str(user.id)
@@ -1166,7 +1159,6 @@ Flame Game - это современная игровая
             reply_markup=markup
         )
 
-    # Справка по играм (текстовые команды)
     elif text.strip().lower() in [
         '/games', 'games', '/игры', 'игры',
         '/game',  'game',  '/игра', 'игра'
@@ -1289,4 +1281,3 @@ if __name__ == '__main__':
             app.run(host='0.0.0.0', port=port, debug=True)
     else:
         print("Не удалось установить вебхук")
-
