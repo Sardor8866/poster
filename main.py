@@ -1,16 +1,27 @@
-import telebot
-from telebot import types
-import json
+import asyncio
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.storage.memory import MemoryStorage
 from datetime import datetime
+import json
 import re
 import os
-from flask import Flask, request, abort
 import threading
 import logging
 import math
+from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Токен бота
+BOT_TOKEN = "8531951028:AAHpjHaMxhUSQQUCuaKaweni-f4AXZ_Tk9A"
+
+# Инициализация бота и диспетчера
+bot = Bot(token=BOT_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 
 file_lock = threading.Lock()
 user_locks = {}
@@ -87,6 +98,7 @@ def is_games_command(text):
     
     return text in games_commands
 
+# Импортируем модули
 from leaders import register_leaders_handlers, leaders_start
 import mines
 import tower
@@ -105,8 +117,6 @@ except ImportError as e:
     print(f"Модуль платежей не найден: {e}")
     print("Функции пополнения и вывода недоступны")
 
-bot = telebot.TeleBot("8531951028:AAHpjHaMxhUSQQUCuaKaweni-f4AXZ_Tk9A")
-
 RENDER = os.environ.get('RENDER', False)
 
 if RENDER:
@@ -117,12 +127,14 @@ else:
 WEBHOOK_PORT = 443 if RENDER else 8443
 WEBHOOK_LISTEN = '0.0.0.0'
 WEBHOOK_URL_BASE = f"https://{WEBHOOK_HOST}"
-WEBHOOK_URL_PATH = f"/webhook/{bot.token}/"
+WEBHOOK_URL_PATH = f"/webhook/{BOT_TOKEN}/"
 
-app = Flask(__name__)
+# Создаем aiohttp приложение
+app = web.Application()
 
-@bot.callback_query_handler(func=lambda call: call.data in ["games_mines", "games_tower", "games_darts", "games_basketball", "games_football", "games_dice"])
-def games_handlers(call):
+# Обработчики игр
+@dp.callback_query(F.data.in_(["games_mines", "games_tower", "games_darts", "games_basketball", "games_football", "games_dice"]))
+async def games_handlers(call: CallbackQuery):
     user_id = str(call.from_user.id)
     
     game_map = {
@@ -138,17 +150,22 @@ def games_handlers(call):
     
     try:
         try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+            await call.message.delete()
         except:
             pass
         
         try:
-            fake_message = type('obj', (object,), {
-                'chat': type('obj', (object,), {'id': call.message.chat.id}),
-                'from_user': call.from_user,
-                'message_id': call.message.message_id,
-                'text': game_name
-            })()
+            # Создаем объект сообщения для совместимости с существующими модулями
+            class FakeMessage:
+                def __init__(self, chat_id, from_user, message_id):
+                    self.chat = type('obj', (object,), {'id': chat_id, 'type': 'private'})
+                    self.from_user = from_user
+                    self.message_id = message_id
+                    self.text = game_name
+                    self.chat.id = chat_id
+                    self.chat.type = 'private'
+            
+            fake_message = FakeMessage(call.message.chat.id, call.from_user, call.message.message_id)
             
             if call.data == "games_mines":
                 mines.mines_start(fake_message)
@@ -169,48 +186,45 @@ def games_handlers(call):
                 
         except Exception as e:
             print(f"Ошибка запуска игры {game_name}: {e}")
-            bot.answer_callback_query(call.id, f"❌ Ошибка при запуске игры!")
+            await call.answer(f"❌ Ошибка при запуске игры!")
     
     except Exception as e:
         print(f"Общая ошибка в обработке игры: {e}")
-        bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
+        await call.answer("❌ Ошибка при запуске игры!")
 
-@bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw", "profile_deposit", "profile_withdraw"])
-def payment_callback_handler(call):
+@dp.callback_query(F.data.in_(["deposit", "withdraw", "profile_deposit", "profile_withdraw"]))
+async def payment_callback_handler(call: CallbackQuery):
     if call.data in ["deposit", "profile_deposit"]:
-        bot.answer_callback_query(call.id, "📥 Пополнение баланса временно недоступно!")
+        await call.answer("📥 Пополнение баланса временно недоступно!")
     elif call.data in ["withdraw", "profile_withdraw"]:
-        bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
+        await call.answer("📤 Вывод средств временно недоступен!")
 
-@bot.callback_query_handler(func=lambda call: call.data == "main_menu")
-def main_menu_callback(call):
+@dp.callback_query(F.data == "main_menu")
+async def main_menu_callback(call: CallbackQuery):
     """Обработчик возврата в главное меню"""
     welcome_text = f"✨ <b>Добро пожаловать, {call.from_user.first_name}!</b>"
     
     try:
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
+        await call.message.edit_text(
             text=welcome_text,
             parse_mode='HTML',
             reply_markup=get_main_inline_menu()
         )
     except:
-        bot.send_message(
-            call.message.chat.id,
-            welcome_text,
+        await call.message.answer(
+            text=welcome_text,
             parse_mode='HTML',
             reply_markup=get_main_inline_menu()
         )
 
-@bot.callback_query_handler(func=lambda call: call.data == "show_profile")
-def profile_callback(call):
+@dp.callback_query(F.data == "show_profile")
+async def profile_callback(call: CallbackQuery):
     """Обработчик профиля из инлайн меню"""
     users_data = load_users_data()
     user_id = str(call.from_user.id)
 
     if user_id not in users_data:
-        bot.answer_callback_query(call.id, "❌ Сначала зарегистрируйтесь через /start")
+        await call.answer("❌ Сначала зарегистрируйтесь через /start")
         return
 
     user_info = users_data[user_id]
@@ -238,49 +252,38 @@ def profile_callback(call):
 <b>📅 В проекте:</b> {days_in_project} дней
 """
 
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    
-    # Кнопки пополнения и вывода
-    if PAYMENTS_ENABLED:
-        markup.row(
-            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
-            types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
-        )
-    else:
-        markup.row(
-            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
-            types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
-        )
-    
-    markup.row(
-        types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
+            InlineKeyboardButton(text="📤 ВЫВЕСТИ", callback_data="profile_withdraw")
+        ],
+        [
+            InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")
+        ]
+    ])
 
     try:
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
+        await call.message.edit_text(
             text=profile_text,
             parse_mode='HTML',
             reply_markup=markup
         )
     except:
-        bot.send_message(
-            call.message.chat.id,
-            profile_text,
+        await call.message.answer(
+            text=profile_text,
             parse_mode='HTML',
             reply_markup=markup
         )
 
-@bot.callback_query_handler(func=lambda call: call.data == "show_referrals")
-def referrals_callback(call):
+@dp.callback_query(F.data == "show_referrals")
+async def referrals_callback(call: CallbackQuery):
     """Обработчик рефералов из инлайн меню"""
     try:
         user_id = str(call.from_user.id)
         users_data = load_users_data()
 
         if user_id not in users_data:
-            bot.answer_callback_query(call.id, "❌ Сначала зарегистрируйтесь через /start")
+            await call.answer("❌ Сначала зарегистрируйтесь через /start")
             return
 
         user_info = users_data[user_id]
@@ -289,25 +292,23 @@ def referrals_callback(call):
         referral_count = len(user_info.get('referrals', []))
 
         try:
-            bot_info = bot.get_me()
+            bot_info = await bot.get_me()
             BOT_USERNAME = bot_info.username
         except:
             BOT_USERNAME = "YOUR_BOT_USERNAME"
 
         referral_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
 
-        markup = types.InlineKeyboardMarkup(row_width=1)
-
         withdraw_text = "💸 Вывести на баланс"
         if referral_bonus_balance < 300:
             withdraw_text = f"💸 Вывести на баланс (нужно {300-referral_bonus_balance}₽)"
 
-        markup.add(
-            types.InlineKeyboardButton(withdraw_text, callback_data="withdraw_referral"),
-            types.InlineKeyboardButton("📋 Мои рефералы", callback_data="my_referrals"),
-            types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}"),
-            types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=withdraw_text, callback_data="withdraw_referral")],
+            [InlineKeyboardButton(text="📋 Мои рефералы", callback_data="my_referrals")],
+            [InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}")],
+            [InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]
+        ])
 
         referral_text = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -338,60 +339,53 @@ def referrals_callback(call):
 """
 
         try:
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
+            await call.message.edit_text(
                 text=referral_text,
                 parse_mode='HTML',
                 reply_markup=markup
             )
         except:
-            bot.send_message(
-                call.message.chat.id,
-                referral_text,
+            await call.message.answer(
+                text=referral_text,
                 parse_mode='HTML',
                 reply_markup=markup
             )
 
     except Exception as e:
         print(f"Ошибка при показе рефералов: {e}")
-        bot.answer_callback_query(call.id, "❌ Ошибка при загрузке реферальной системы")
+        await call.answer("❌ Ошибка при загрузке реферальной системы")
 
-@bot.callback_query_handler(func=lambda call: call.data == "show_leaders")
-def leaders_callback(call):
+@dp.callback_query(F.data == "show_leaders")
+async def leaders_callback(call: CallbackQuery):
     """Обработчик ТОПа из инлайн меню"""
     try:
         from leaders import get_leaders_text
         
         leaders_text = get_leaders_text()
         
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.row(
-            types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]
+        ])
         
         try:
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
+            await call.message.edit_text(
                 text=leaders_text,
                 parse_mode='HTML',
                 reply_markup=markup
             )
         except Exception as e:
             print(f"Ошибка редактирования ТОПа: {e}")
-            bot.send_message(
-                call.message.chat.id,
-                leaders_text,
+            await call.message.answer(
+                text=leaders_text,
                 parse_mode='HTML',
                 reply_markup=markup
             )
     except Exception as e:
         print(f"Ошибка в leaders_callback: {e}")
-        bot.answer_callback_query(call.id, "❌ Ошибка загрузки ТОПа")
+        await call.answer("❌ Ошибка загрузки ТОПа")
 
-@bot.callback_query_handler(func=lambda call: call.data == "show_games")
-def games_callback(call):
+@dp.callback_query(F.data == "show_games")
+async def games_callback(call: CallbackQuery):
     """Обработчик игр из инлайн меню"""
     user_id = str(call.from_user.id)
     balance_text, markup = games_inline_menu(user_id)
@@ -405,23 +399,20 @@ def games_callback(call):
 """
     
     try:
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
+        await call.message.edit_text(
             text=games_text,
             parse_mode='HTML',
             reply_markup=markup
         )
     except:
-        bot.send_message(
-            call.message.chat.id,
-            games_text,
+        await call.message.answer(
+            text=games_text,
             parse_mode='HTML',
             reply_markup=markup
         )
 
-@bot.callback_query_handler(func=lambda call: call.data == "show_about")
-def about_callback(call):
+@dp.callback_query(F.data == "show_about")
+async def about_callback(call: CallbackQuery):
     """Обработчик О проекте из инлайн меню"""
     info_text = """
 <blockquote expandable>╔══════════════════════╗
@@ -453,41 +444,24 @@ Flame Game - это современная игровая
 <i>❄️ Присоединяйся к Festery Game сегодня!</i>
 """
 
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.row(
-        types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]
+    ])
     
     try:
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
+        await call.message.edit_text(
             text=info_text,
             parse_mode='HTML',
             reply_markup=markup
         )
     except:
-        bot.send_message(
-            call.message.chat.id,
-            info_text,
+        await call.message.answer(
+            text=info_text,
             parse_mode='HTML',
             reply_markup=markup
         )
 
-leaders.register_leaders_handlers(bot)
-mines.register_mines_handlers(bot)
-tower.register_tower_handlers(bot)
-register_referrals_handlers(bot)
-register_admin_handlers(bot)
-register_games_handlers(bot)
-register_bonus_handlers(bot)
-
-if PAYMENTS_ENABLED:
-    register_crypto_handlers(bot)
-    print("Хендлеры платежей зарегистрированы")
-else:
-    print("Хендлеры платежей не зарегистрированы")
-
+# Функции для работы с данными
 def load_users_data():
     try:
         with file_lock:
@@ -509,9 +483,9 @@ def save_users_data(data):
         logger.error(f"Ошибка сохранения данных: {e}")
         return False
 
-def get_user_avatar(user_id):
+async def get_user_avatar(user_id):
     try:
-        photos = bot.get_user_profile_photos(user_id, limit=1)
+        photos = await bot.get_user_profile_photos(user_id, limit=1)
         if photos.total_count > 0:
             file_id = photos.photos[0][-1].file_id
             return file_id
@@ -521,23 +495,19 @@ def get_user_avatar(user_id):
 
 def get_main_inline_menu():
     """Главное инлайн меню"""
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    
-    markup.row(
-        types.InlineKeyboardButton("❄️ Профиль", callback_data="show_profile"),
-        types.InlineKeyboardButton("👥 Рефералы", callback_data="show_referrals")
-    )
-    
-    markup.row(
-        types.InlineKeyboardButton("🏆 ТОП Игроков", callback_data="show_leaders"),
-        types.InlineKeyboardButton("🎮 Игры", callback_data="show_games")
-    )
-    
-    markup.row(
-        types.InlineKeyboardButton("ℹ️ О проекте", callback_data="show_about")
-    )
-    
-    return markup
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❄️ Профиль", callback_data="show_profile"),
+            InlineKeyboardButton(text="👥 Рефералы", callback_data="show_referrals")
+        ],
+        [
+            InlineKeyboardButton(text="🏆 ТОП Игроков", callback_data="show_leaders"),
+            InlineKeyboardButton(text="🎮 Игры", callback_data="show_games")
+        ],
+        [
+            InlineKeyboardButton(text="ℹ️ О проекте", callback_data="show_about")
+        ]
+    ])
 
 def games_inline_menu(user_id):
     users_data = load_users_data()
@@ -548,40 +518,37 @@ def games_inline_menu(user_id):
         balance = 0
     balance_rounded = round(balance, 2)
 
-    markup = types.InlineKeyboardMarkup(row_width=2)
-
     balance_text = f"""
 <blockquote>
 💎 <b>Баланс:</b> {balance_rounded}₽
 </blockquote>
 """
 
-    markup.row(
-        types.InlineKeyboardButton("💣 Мины", callback_data="games_mines"),
-        types.InlineKeyboardButton("🏰 Башня", callback_data="games_tower")
-    )
-
-    markup.row(
-        types.InlineKeyboardButton("🎯 Дартс", callback_data="games_darts"),
-        types.InlineKeyboardButton("🏀 Баскетбол", callback_data="games_basketball")
-    )
-
-    markup.row(
-        types.InlineKeyboardButton("⚽ Футбол", callback_data="games_football"),
-        types.InlineKeyboardButton("🎲 Кости", callback_data="games_dice")
-    )
-
-    markup.row(
-        types.InlineKeyboardButton("◀️ Назад в меню", callback_data="main_menu")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💣 Мины", callback_data="games_mines"),
+            InlineKeyboardButton(text="🏰 Башня", callback_data="games_tower")
+        ],
+        [
+            InlineKeyboardButton(text="🎯 Дартс", callback_data="games_darts"),
+            InlineKeyboardButton(text="🏀 Баскетбол", callback_data="games_basketball")
+        ],
+        [
+            InlineKeyboardButton(text="⚽ Футбол", callback_data="games_football"),
+            InlineKeyboardButton(text="🎲 Кости", callback_data="games_dice")
+        ],
+        [
+            InlineKeyboardButton(text="◀️ Назад в меню", callback_data="main_menu")
+        ]
+    ])
 
     return balance_text, markup
 
-def is_private_chat(message):
+def is_private_chat(message: Message):
     return message.chat.type == 'private'
 
-@bot.message_handler(commands=['start'])
-def start_message(message):
+@dp.message(Command('start'))
+async def start_message(message: Message):
     users_data = load_users_data()
     user_id = str(message.from_user.id)
     user_first_name = message.from_user.first_name or "Игрок"
@@ -686,28 +653,26 @@ def start_message(message):
     welcome_text = f"✨ <b>Добро пожаловать, {user_first_name}!</b>"
 
     if is_private_chat(message):
-        bot.send_message(
-            message.chat.id,
-            welcome_text,
+        await message.answer(
+            text=welcome_text,
             reply_markup=get_main_inline_menu(),
             parse_mode='HTML'
         )
     else:
-        bot.send_message(
-            message.chat.id,
-            welcome_text,
+        await message.answer(
+            text=welcome_text,
             parse_mode='HTML'
         )
 
     print(f"=== ЗАВЕРШЕНО ОБРАБОТКА /start ===\n")
 
-@bot.message_handler(commands=['бал', 'баланс', 'balance'])
-def balance_command(message):
+@dp.message(Command('бал', 'баланс', 'balance'))
+async def balance_command(message: Message):
     users_data = load_users_data()
     user_id = str(message.from_user.id)
 
     if user_id not in users_data:
-        bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
+        await message.answer("❌ Сначала зарегистрируйтесь через /start")
         return
 
     user_info = users_data[user_id]
@@ -730,20 +695,19 @@ def balance_command(message):
 💰 <b>Баланс:</b> {balance_rounded}₽
 """
 
-    bot.send_message(
-        message.chat.id,
-        balance_text,
+    await message.answer(
+        text=balance_text,
         parse_mode='HTML',
         reply_to_message_id=message.message_id
     )
 
-@bot.message_handler(func=lambda message: message.text and message.text.lower() in ['профиль', 'профил', '/профиль', '/profile', 'profile'])
-def profile_command(message):
+@dp.message(F.text & (F.text.lower().in_(['профиль', 'профил', '/профиль', '/profile', 'profile'])))
+async def profile_command(message: Message):
     users_data = load_users_data()
     user_id = str(message.from_user.id)
 
     if user_id not in users_data:
-        bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
+        await message.answer("❌ Сначала зарегистрируйтесь через /start")
         return
 
     user_info = users_data[user_id]
@@ -756,7 +720,7 @@ def profile_command(message):
     total_deposits = user_info.get('total_deposits', 0)
     total_withdrawals = user_info.get('total_withdrawals', 0)
 
-    avatar_file_id = get_user_avatar(message.from_user.id)
+    avatar_file_id = await get_user_avatar(message.from_user.id)
 
     profile_text = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -773,28 +737,19 @@ def profile_command(message):
 <b>📅 В проекте:</b> {days_in_project} дней
 """
 
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    
-    # Кнопки пополнения и вывода
-    if PAYMENTS_ENABLED:
-        markup.row(
-            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
-            types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
-        )
-    else:
-        markup.row(
-            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
-            types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
-        )
-    
-    markup.row(
-        types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
+            InlineKeyboardButton(text="📤 ВЫВЕСТИ", callback_data="profile_withdraw")
+        ],
+        [
+            InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")
+        ]
+    ])
 
     if avatar_file_id:
         try:
-            bot.send_photo(
-                message.chat.id,
+            await message.answer_photo(
                 photo=avatar_file_id,
                 caption=profile_text,
                 reply_markup=markup,
@@ -803,36 +758,33 @@ def profile_command(message):
             )
         except Exception as e:
             print(f"Ошибка отправки фото: {e}")
-            bot.send_message(
-                message.chat.id,
-                profile_text,
+            await message.answer(
+                text=profile_text,
                 reply_markup=markup,
                 parse_mode='HTML',
                 reply_to_message_id=message.message_id
             )
     else:
-        bot.send_message(
-            message.chat.id,
-            profile_text,
+        await message.answer(
+            text=profile_text,
             reply_markup=markup,
             parse_mode='HTML',
             reply_to_message_id=message.message_id
         )
 
-@bot.message_handler(func=lambda message: (message.text and message.text.strip() and message.text.strip().split()[0].lower() in ['/pay', 'дать', 'перевести', 'перевод']))
-def pay_command(message):
+@dp.message(F.text.regexp(r'^/(pay|дать|перевести|перевод)\s+\d+'))
+async def pay_command(message: Message):
     users_data = load_users_data()
     sender_id = str(message.from_user.id)
 
     if sender_id not in users_data:
-        bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
+        await message.answer("❌ Сначала зарегистрируйтесь через /start")
         return
 
     if not message.reply_to_message:
-        bot.send_message(
-            message.chat.id,
-            "❌ Ответьте на сообщение пользователя для перевода\n"
-            "Пример: <code>/pay 100</code>",
+        await message.answer(
+            text="❌ Ответьте на сообщение пользователя для перевода\n"
+                 "Пример: <code>/pay 100</code>",
             reply_to_message_id=message.message_id
         )
         return
@@ -841,17 +793,15 @@ def pay_command(message):
     recipient_id = str(recipient.id)
 
     if sender_id == recipient_id:
-        bot.send_message(
-            message.chat.id,
-            "❌ Нельзя переводить самому себе!",
+        await message.answer(
+            text="❌ Нельзя переводить самому себе!",
             reply_to_message_id=message.message_id
         )
         return
 
     if recipient_id not in users_data:
-        bot.send_message(
-            message.chat.id,
-            f"❌ Пользователь не зарегистрирован!",
+        await message.answer(
+            text="❌ Пользователь не зарегистрирован!",
             reply_to_message_id=message.message_id
         )
         return
@@ -866,25 +816,22 @@ def pay_command(message):
         
         amount = validate_amount(amount, min_amount=1, max_amount=1000)
         if amount is None:
-            bot.send_message(
-                message.chat.id,
-                "❌ Некорректная сумма!",
+            await message.answer(
+                text="❌ Некорректная сумма!",
                 reply_to_message_id=message.message_id
             )
             return
 
         if amount < 1:
-            bot.send_message(
-                message.chat.id,
-                "❌ Мин: 1₽",
+            await message.answer(
+                text="❌ Мин: 1₽",
                 reply_to_message_id=message.message_id
             )
             return
 
         if amount > 1000:
-            bot.send_message(
-                message.chat.id,
-                "❌ Макс: 1000₽",
+            await message.answer(
+                text="❌ Макс: 1000₽",
                 reply_to_message_id=message.message_id
             )
             return
@@ -905,9 +852,8 @@ def pay_command(message):
                     users_data[sender_id]['balance'] = 0
                 
                 if sender_balance < amount:
-                    bot.send_message(
-                        message.chat.id,
-                        f"❌ Недостаточно средств!",
+                    await message.answer(
+                        text="❌ Недостаточно средств!",
                         reply_to_message_id=message.message_id
                     )
                     return
@@ -915,9 +861,8 @@ def pay_command(message):
                 new_sender_balance = round(sender_balance - amount, 2)
                 
                 if new_sender_balance < 0:
-                    bot.send_message(
-                        message.chat.id,
-                        f"❌ Ошибка: баланс не может быть отрицательным!",
+                    await message.answer(
+                        text="❌ Ошибка: баланс не может быть отрицательным!",
                         reply_to_message_id=message.message_id
                     )
                     return
@@ -936,25 +881,23 @@ def pay_command(message):
 
         recipient_name = recipient.username or recipient.first_name
 
-        bot.send_message(
-            message.chat.id,
-            f"✅ Перевод завершен\n"
-            f"💸 {amount}₽ → @{recipient_name}",
+        await message.answer(
+            text=f"✅ Перевод завершен\n"
+                 f"💸 {amount}₽ → @{recipient_name}",
             parse_mode='HTML',
             reply_to_message_id=message.message_id
         )
 
     except ValueError:
-        bot.send_message(
-            message.chat.id,
-            "❌ Используйте: /pay [сумма]\n"
-            "Пример: <code>/pay 100</code>",
+        await message.answer(
+            text="❌ Используйте: /pay [сумма]\n"
+                 "Пример: <code>/pay 100</code>",
             parse_mode='HTML',
             reply_to_message_id=message.message_id
         )
 
-@bot.message_handler(content_types=['text'])
-def menu_handler(message):
+@dp.message(F.text)
+async def menu_handler(message: Message):
     if not is_private_chat(message):
         # Обработка сообщений в группах
         text = message.text.strip()
@@ -978,14 +921,16 @@ def menu_handler(message):
 👤 <b>{user_display}</b>
 💰 <b>Баланс:</b> {balance_rounded}₽
 """
-                bot.send_message(
-                    message.chat.id,
-                    balance_text,
+                await message.answer(
+                    text=balance_text,
                     parse_mode='HTML',
                     reply_to_message_id=message.message_id
                 )
             else:
-                bot.send_message(message.chat.id, "❌ Сначала напишите /start в личные сообщения боту", reply_to_message_id=message.message_id)
+                await message.answer(
+                    text="❌ Сначала напишите /start в личные сообщения боту",
+                    reply_to_message_id=message.message_id
+                )
         return
 
     # Обработка в личных сообщениях
@@ -996,7 +941,7 @@ def menu_handler(message):
 
     if text == "❄️ Профиль" or text.lower() in ['профиль', 'профил', '/профиль', '/profile', 'profile']:
         if user_id not in users_data:
-            bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
+            await message.answer("❌ Сначала зарегистрируйтесь через /start")
             return
 
         user_info = users_data[user_id]
@@ -1009,7 +954,7 @@ def menu_handler(message):
         total_deposits = user_info.get('total_deposits', 0)
         total_withdrawals = user_info.get('total_withdrawals', 0)
 
-        avatar_file_id = get_user_avatar(user.id)
+        avatar_file_id = await get_user_avatar(user.id)
 
         profile_text = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -1026,28 +971,19 @@ def menu_handler(message):
 <b>📅 В проекте:</b> {days_in_project} дней
 """
 
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        
-        # Кнопки пополнения и вывода
-        if PAYMENTS_ENABLED:
-            markup.row(
-                types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
-                types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
-            )
-        else:
-            markup.row(
-                types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
-                types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
-            )
-        
-        markup.row(
-            types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
+                InlineKeyboardButton(text="📤 ВЫВЕСТИ", callback_data="profile_withdraw")
+            ],
+            [
+                InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")
+            ]
+        ])
 
         if avatar_file_id:
             try:
-                bot.send_photo(
-                    message.chat.id,
+                await message.answer_photo(
                     photo=avatar_file_id,
                     caption=profile_text,
                     reply_markup=markup,
@@ -1055,16 +991,14 @@ def menu_handler(message):
                 )
             except Exception as e:
                 print(f"Ошибка отправки фото: {e}")
-                bot.send_message(
-                    message.chat.id,
-                    profile_text,
+                await message.answer(
+                    text=profile_text,
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
         else:
-            bot.send_message(
-                message.chat.id,
-                profile_text,
+            await message.answer(
+                text=profile_text,
                 reply_markup=markup,
                 parse_mode='HTML'
             )
@@ -1075,7 +1009,7 @@ def menu_handler(message):
             users_data = load_users_data()
 
             if user_id not in users_data:
-                bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
+                await message.answer("❌ Сначала зарегистрируйтесь через /start")
                 return
 
             user_info = users_data[user_id]
@@ -1084,25 +1018,23 @@ def menu_handler(message):
             referral_count = len(user_info.get('referrals', []))
 
             try:
-                bot_info = bot.get_me()
+                bot_info = await bot.get_me()
                 BOT_USERNAME = bot_info.username
             except:
                 BOT_USERNAME = "YOUR_BOT_USERNAME"
 
             referral_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
 
-            markup = types.InlineKeyboardMarkup(row_width=1)
-
             withdraw_text = "💸 Вывести на баланс"
             if referral_bonus_balance < 300:
                 withdraw_text = f"💸 Вывести на баланс (нужно {300-referral_bonus_balance}₽)"
 
-            markup.add(
-                types.InlineKeyboardButton(withdraw_text, callback_data="withdraw_referral"),
-                types.InlineKeyboardButton("📋 Мои рефералы", callback_data="my_referrals"),
-                types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}"),
-                types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-            )
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=withdraw_text, callback_data="withdraw_referral")],
+                [InlineKeyboardButton(text="📋 Мои рефералы", callback_data="my_referrals")],
+                [InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}")],
+                [InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]
+            ])
 
             referral_text = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -1132,20 +1064,22 @@ def menu_handler(message):
 <b>⚠️ Для вывода нажмите кнопку "💸 Вывести на баланс"</b>
 """
 
-            bot.send_message(
-                message.chat.id,
-                referral_text,
+            await message.answer(
+                text=referral_text,
                 parse_mode='HTML',
                 reply_markup=markup
             )
 
         except Exception as e:
             print(f"Ошибка при показе рефералов: {e}")
-            bot.send_message(message.chat.id, "❌ Ошибка при загрузке реферальной системы", reply_markup=get_main_inline_menu())
+            await message.answer(
+                text="❌ Ошибка при загрузке реферальной системы",
+                reply_markup=get_main_inline_menu()
+            )
 
     elif text == "🏆 ТОП Игроков" or text.lower() in ['/топ', 'топ']:
         from leaders import show_leaders
-        show_leaders(bot, message)
+        await show_leaders(bot, message)
 
     elif text == "ℹ️ О проекте" or text.lower() in ['/о проекте', 'о проекте']:
         info_text = """
@@ -1178,21 +1112,19 @@ Flame Game - это современная игровая
 <i>❄️ Присоединяйся к Festery Game сегодня!</i>
 """
 
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.row(
-            types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ В меню", callback_data="main_menu")]
+        ])
 
-        bot.send_message(
-            message.chat.id,
-            info_text,
+        await message.answer(
+            text=info_text,
             parse_mode='HTML',
             reply_markup=markup
         )
 
     elif text == "🎮 Игры" or text.lower() in ['/games', 'games', '/игры', 'игры']:
         if user_id not in users_data:
-            bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
+            await message.answer("❌ Сначала зарегистрируйтесь через /start")
             return
 
         balance_text, markup = games_inline_menu(user_id)
@@ -1204,9 +1136,8 @@ Flame Game - это современная игровая
 
 {balance_text}
 """
-        bot.send_message(
-            message.chat.id,
-            games_text,
+        await message.answer(
+            text=games_text,
             parse_mode='HTML',
             reply_markup=markup
         )
@@ -1226,68 +1157,88 @@ Flame Game - это современная игровая
 👤 <b>{user_display}</b>
 💰 <b>Баланс:</b> {balance_rounded}₽
 """
-            bot.send_message(
-                message.chat.id,
-                balance_text,
+            await message.answer(
+                text=balance_text,
                 parse_mode='HTML',
                 reply_to_message_id=message.message_id
             )
         else:
-            bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
+            await message.answer("❌ Сначала зарегистрируйтесь через /start")
 
     else:
-        bot.send_message(
-            message.chat.id,
-            f"✨ <b>Добро пожаловать, {user.first_name}!</b>",
+        await message.answer(
+            text=f"✨ <b>Добро пожаловать, {user.first_name}!</b>",
             parse_mode='HTML',
             reply_markup=get_main_inline_menu()
         )
 
+# Вебхук обработчик
+async def webhook_handler(request):
+    try:
+        update = types.Update(**await request.json())
+        await dp.feed_update(bot, update)
+        return web.Response(status=200)
+    except Exception as e:
+        logger.error(f"Ошибка обработки вебхука: {e}")
+        return web.Response(status=500)
+
 @app.route(WEBHOOK_URL_PATH, methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return ''
-    else:
-        abort(403)
+async def webhook(request):
+    return await webhook_handler(request)
 
 @app.route('/')
-def index():
-    return 'Bot is running!'
+async def index(request):
+    return web.Response(text='Bot is running!')
 
 @app.route('/health')
-def health():
-    return 'OK', 200
+async def health(request):
+    return web.Response(text='OK', status=200)
 
 @app.route('/set_webhook')
-def set_webhook_route():
+async def set_webhook_route(request):
     try:
-        bot.remove_webhook()
-        bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
-        return f'Вебхук установлен: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}'
+        await bot.delete_webhook()
+        await bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
+        return web.Response(text=f'Вебхук установлен: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}')
     except Exception as e:
-        return f'Ошибка: {str(e)}'
+        return web.Response(text=f'Ошибка: {str(e)}')
 
-def set_webhook():
+async def set_webhook():
     try:
-        bot.remove_webhook()
-        bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
+        await bot.delete_webhook()
+        await bot.set_webhook(url=WEBHOOK_URL_BASE + WEBHOOK_URL_PATH)
         print(f"Вебхук установлен: {WEBHOOK_URL_BASE + WEBHOOK_URL_PATH}")
         return True
     except Exception as e:
         print(f"Ошибка установки вебхука: {e}")
         return False
 
-if __name__ == '__main__':
-    if set_webhook():
+async def on_startup():
+    await set_webhook()
+
+async def on_shutdown():
+    await bot.delete_webhook()
+    await dp.storage.close()
+
+async def main():
+    if RENDER:
+        # Запуск с вебхуком
         port = int(os.environ.get('PORT', 10000))
-        print(f"Запуск на порту: {port}")
+        app.on_startup.append(lambda app: asyncio.create_task(on_startup()))
+        app.on_shutdown.append(lambda app: asyncio.create_task(on_shutdown()))
         
-        if RENDER:
-            app.run(host='0.0.0.0', port=port)
-        else:
-            app.run(host='0.0.0.0', port=port, debug=True)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', port)
+        await site.start()
+        print(f"Сервер запущен на порту {port}")
+        
+        # Держим приложение запущенным
+        await asyncio.Event().wait()
     else:
-        print("Не удалось установить вебхук")
+        # Запуск в режиме long polling
+        print("Запуск в режиме long polling")
+        await dp.start_polling(bot)
+
+if __name__ == '__main__':
+    asyncio.run(main())
