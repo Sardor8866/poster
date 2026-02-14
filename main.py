@@ -175,9 +175,108 @@ def games_mines_tower_handler(call):
 def payment_callback_handler(call):
     if call.data == "deposit":
         bot.answer_callback_query(call.id, "📥 Пополнение баланса временно недоступно!")
-
     elif call.data == "withdraw":
         bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
+
+@bot.callback_query_handler(func=lambda call: call.data == "main_menu")
+def main_menu_callback(call):
+    """Обработчик возврата в главное меню"""
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    
+    bot.send_message(
+        call.message.chat.id,
+        f"✨ <b>Добро пожаловать, {call.from_user.first_name}!</b>",
+        parse_mode='HTML',
+        reply_markup=get_main_inline_menu()
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == "show_profile")
+def profile_callback(call):
+    """Обработчик профиля из инлайн меню"""
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    
+    fake_message = type('obj', (object,), {
+        'chat': type('obj', (object,), {'id': call.message.chat.id}),
+        'from_user': call.from_user,
+        'message_id': call.message.message_id,
+        'text': "❄️ Профиль"
+    })()
+    
+    profile_command(fake_message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "show_referrals")
+def referrals_callback(call):
+    """Обработчик рефералов из инлайн меню"""
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    
+    fake_message = type('obj', (object,), {
+        'chat': type('obj', (object,), {'id': call.message.chat.id}),
+        'from_user': call.from_user,
+        'message_id': call.message.message_id,
+        'text': "👥 Рефералы"
+    })()
+    
+    menu_handler(fake_message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "show_leaders")
+def leaders_callback(call):
+    """Обработчик ТОПа из инлайн меню"""
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    
+    fake_message = type('obj', (object,), {
+        'chat': type('obj', (object,), {'id': call.message.chat.id}),
+        'from_user': call.from_user,
+        'message_id': call.message.message_id,
+        'text': "🏆 ТОП Игроков"
+    })()
+    
+    menu_handler(fake_message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "show_games")
+def games_callback(call):
+    """Обработчик игр из инлайн меню"""
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    
+    fake_message = type('obj', (object,), {
+        'chat': type('obj', (object,), {'id': call.message.chat.id}),
+        'from_user': call.from_user,
+        'message_id': call.message.message_id,
+        'text': "🎮 Игры"
+    })()
+    
+    menu_handler(fake_message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "show_about")
+def about_callback(call):
+    """Обработчик О проекте из инлайн меню"""
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    
+    fake_message = type('obj', (object,), {
+        'chat': type('obj', (object,), {'id': call.message.chat.id}),
+        'from_user': call.from_user,
+        'message_id': call.message.message_id,
+        'text': "ℹ️ О проекте"
+    })()
+    
+    menu_handler(fake_message)
 
 leaders.register_leaders_handlers(bot)
 mines.register_mines_handlers(bot)
@@ -224,12 +323,24 @@ def get_user_avatar(user_id):
         print(f"Ошибка получения аватарки: {e}")
     return None
 
-def main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton("❄️ Профиль"), types.KeyboardButton("👥 Рефералы"))
-    markup.row(types.KeyboardButton("🏆 ТОП Игроков"))
-    markup.row(types.KeyboardButton("🎮 Игры"))
-    markup.row(types.KeyboardButton("ℹ️ О проекте"))
+def get_main_inline_menu():
+    """Главное инлайн меню"""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    
+    markup.row(
+        types.InlineKeyboardButton("❄️ Профиль", callback_data="show_profile"),
+        types.InlineKeyboardButton("👥 Рефералы", callback_data="show_referrals")
+    )
+    
+    markup.row(
+        types.InlineKeyboardButton("🏆 ТОП Игроков", callback_data="show_leaders"),
+        types.InlineKeyboardButton("🎮 Игры", callback_data="show_games")
+    )
+    
+    markup.row(
+        types.InlineKeyboardButton("ℹ️ О проекте", callback_data="show_about")
+    )
+    
     return markup
 
 def games_inline_menu(user_id):
@@ -264,6 +375,10 @@ def games_inline_menu(user_id):
         types.InlineKeyboardButton("🎲 Кости", callback_data="games_dice")
     )
 
+    markup.row(
+        types.InlineKeyboardButton("◀️ Назад в меню", callback_data="main_menu")
+    )
+
     return balance_text, markup
 
 def is_private_chat(message):
@@ -274,7 +389,6 @@ def start_message(message):
     users_data = load_users_data()
     user_id = str(message.from_user.id)
     user_first_name = message.from_user.first_name or "Игрок"
-    user_username = f"@{message.from_user.username}" if message.from_user.username else user_first_name
 
     is_new_user = user_id not in users_data
     is_referral_join = False
@@ -364,106 +478,20 @@ def start_message(message):
                     save_users_data(users_data)
                     print(f"Создан обычный пользователь {user_id} без реферала")
 
-    users_data = load_users_data()
-
-    user_info = users_data.get(user_id, {})
-    referrer_id = user_info.get('referrer_id')
-    has_referrer = referrer_id is not None and referrer_id in users_data
-
     if is_referral_join and referrer_data and is_new_user:
-        welcome_text = f"""
-<blockquote expandable>╔══════════════════════╗
-   ❄️ <b>FESTERY GAME</b> ❄️
-╚══════════════════════╝</blockquote>
-
-✨ <b>Добро пожаловать, {user_first_name}!</b>
-
-<blockquote>
-🎮 <b>Присоединился по приглашению</b>
-├ 👤 Игрок: <b>{user_username}</b>
-├ 🆔 ID: <code>{user_id}</code>
-└ 🤝 Пригласил: <b>{referrer_data.get('referrer_name', 'Друг')}</b>
-</blockquote>
-
-<blockquote>
-<b>❄️ ДОСТУПНЫЕ ИГРЫ:</b>
-<code>💣 Мины | 🏰 Башня</code>
-<code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
-</blockquote>
-
-<i>❄️ Удачной игры и больших побед!</i>
-"""
-
+        referrer_id = users_data.get(user_id, {}).get('referrer_id')
         if referrer_id:
             send_referral_notification_to_referrer(referrer_id, user_id)
             print(f"Отправлено уведомление рефереру {referrer_id}")
 
-        send_referral_welcome_message(message.chat.id, referrer_data)
-
-    elif is_new_user:
-        welcome_text = f"""
-<blockquote expandable>╔══════════════════════╗
-   ❄️ <b>FESTERY GAME</b> ❄️
-╚══════════════════════╝</blockquote>
-
-✨ <b>Добро пожаловать, {user_first_name}!</b>
-
-<blockquote>
-🎮 <b>Твой игровой путь начинается</b>
-├ 👤 Игрок: <b>{user_username}</b>
-├ 🆔 ID: <code>{user_id}</code>
-└ 📅 Регистрация: <b>сегодня</b>
-</blockquote>
-
-<blockquote>
-<b>❄️ ДОСТУПНЫЕ ИГРЫ:</b>
-<code>💣 Мины | 🏰 Башня</code>
-<code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
-</blockquote>
-
-<blockquote>
-<b>👥 РЕФЕРАЛЬНАЯ СИСТЕМА:</b>
-Приглашай друзей и получай <b>6%</b>
-от их выигрышных ставок!
-</blockquote>
-
-<i>💫 Выбирай игру и начинай! Удачи! 🚀</i>
-"""
-    else:
-        if has_referrer:
-            referrer_name = users_data.get(referrer_id, {}).get('first_name', 'Ваш друг')
-            referrer_text = f"└ 🤝 Ваш реферер: <b>{referrer_name}</b>"
-        else:
-            referrer_text = "└ 📈 Пригласи друзей и получай бонусы!"
-
-        welcome_text = f"""
-<blockquote expandable>╔══════════════════════╗
-   ❄️ <b>FESTERY GAME</b> ❄️
-╚══════════════════════╝</blockquote>
-
-✨ <b>С возвращением, {user_first_name}!</b>
-
-<blockquote>
-🎮 <b>Снова в игре</b>
-├ 👤 Игрок: <b>{user_username}</b>
-├ 🆔 ID: <code>{user_id}</code>
-{referrer_text}
-</blockquote>
-
-<blockquote>
-<b>❄️ ДОСТУПНЫЕ ИГРЫ:</b>
-<code>💣 Мины | 🏰 Башня</code>
-<code>🎯 Дартс | 🏀 Баскетбол | ⚽ Футбол | 🎲 Кости</code>
-</blockquote>
-
-<i>💫 Выбирай игру и продолжай! Удачи! 🚀</i>
-"""
+    # Простое приветствие
+    welcome_text = f"✨ <b>Добро пожаловать, {user_first_name}!</b>"
 
     if is_private_chat(message):
         bot.send_message(
             message.chat.id,
             welcome_text,
-            reply_markup=main_menu(),
+            reply_markup=get_main_inline_menu(),
             parse_mode='HTML'
         )
     else:
@@ -548,16 +576,9 @@ def profile_command(message):
 """
 
     markup = types.InlineKeyboardMarkup(row_width=2)
-    if PAYMENTS_ENABLED:
-        markup.row(
-            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
-            types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
-        )
-    else:
-        markup.row(
-            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
-            types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
-        )
+    markup.row(
+        types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
+    )
 
     if avatar_file_id:
         try:
@@ -783,16 +804,9 @@ def menu_handler(message):
 <b>📅 В проекте:</b> {days_in_project} дней
 """
                 markup = types.InlineKeyboardMarkup(row_width=2)
-                if PAYMENTS_ENABLED:
-                    markup.row(
-                        types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
-                        types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
-                    )
-                else:
-                    markup.row(
-                        types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
-                        types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
-                    )
+                markup.row(
+                    types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
+                )
 
                 if avatar_file_id:
                     try:
@@ -849,7 +863,8 @@ def menu_handler(message):
                 markup.add(
                     types.InlineKeyboardButton(withdraw_text, callback_data="withdraw_referral"),
                     types.InlineKeyboardButton("📋 Мои рефералы", callback_data="my_referrals"),
-                    types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}")
+                    types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}"),
+                    types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
                 )
 
                 referral_text = f"""
@@ -995,16 +1010,9 @@ Flame Game - это современная игровая
 """
 
             markup = types.InlineKeyboardMarkup(row_width=2)
-            if PAYMENTS_ENABLED:
-                markup.row(
-                    types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
-                    types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
-                )
-            else:
-                markup.row(
-                    types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
-                    types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
-                )
+            markup.row(
+                types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
+            )
 
             if avatar_file_id:
                 try:
@@ -1031,7 +1039,7 @@ Flame Game - это современная игровая
                     parse_mode='HTML'
                 )
         else:
-            bot.send_message(message.chat.id, "❌ Профиль не найден. Нажмите /start", reply_markup=main_menu())
+            bot.send_message(message.chat.id, "❌ Профиль не найден. Нажмите /start", reply_markup=get_main_inline_menu())
 
     elif text == "👥 Рефералы":
         try:
@@ -1064,7 +1072,8 @@ Flame Game - это современная игровая
             markup.add(
                 types.InlineKeyboardButton(withdraw_text, callback_data="withdraw_referral"),
                 types.InlineKeyboardButton("📋 Мои рефералы", callback_data="my_referrals"),
-                types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}")
+                types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}"),
+                types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
             )
 
             referral_text = f"""
@@ -1104,7 +1113,7 @@ Flame Game - это современная игровая
 
         except Exception as e:
             print(f"Ошибка при показе рефералов: {e}")
-            bot.send_message(message.chat.id, "❌ Ошибка при загрузке реферальной системы", reply_markup=main_menu())
+            bot.send_message(message.chat.id, "❌ Ошибка при загрузке реферальной системы", reply_markup=get_main_inline_menu())
 
     elif text == "🏆 ТОП Игроков":
         from leaders import show_leaders
@@ -1140,7 +1149,7 @@ Flame Game - это современная игровая
 
 <i>❄️ Присоединяйся к Festery Game сегодня!</i>
 """
-        bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_markup=main_menu())
+        bot.send_message(message.chat.id, info_text, parse_mode='HTML', reply_markup=get_main_inline_menu())
 
     elif text == "🎮 Игры":
         balance_text, markup = games_inline_menu(user_id)
@@ -1167,7 +1176,7 @@ Flame Game - это современная игровая
             message.chat.id,
             get_games_info(),
             parse_mode='HTML',
-            reply_markup=main_menu()
+            reply_markup=get_main_inline_menu()
         )
 
     elif text in ["🎲 Кости", "🏀 Баскетбол", "⚽ Футбол", "🎯 Дартс"]:
@@ -1194,6 +1203,7 @@ Flame Game - это современная игровая
 
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🎮 Начать игру", callback_data=callback_data))
+        markup.add(types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu"))
 
         bot.send_message(
             message.chat.id,
@@ -1231,7 +1241,7 @@ Flame Game - это современная игровая
             bot.send_message(message.chat.id, "❌ Сначала зарегистрируйтесь через /start")
 
     else:
-        bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=main_menu())
+        bot.send_message(message.chat.id, "❌ Используй меню ниже для навигации.", reply_markup=get_main_inline_menu())
 
 @app.route(WEBHOOK_URL_PATH, methods=['POST'])
 def webhook():
