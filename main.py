@@ -121,61 +121,65 @@ WEBHOOK_URL_PATH = f"/webhook/{bot.token}/"
 
 app = Flask(__name__)
 
-@bot.callback_query_handler(func=lambda call: call.data in ["games_mines", "games_tower"])
-def games_mines_tower_handler(call):
+@bot.callback_query_handler(func=lambda call: call.data in ["games_mines", "games_tower", "games_darts", "games_basketball", "games_football", "games_dice"])
+def games_handlers(call):
     user_id = str(call.from_user.id)
     
-    if call.data == "games_mines":
-        try:
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except:
-                pass
-            
-            try:
-                fake_message = type('obj', (object,), {
-                    'chat': type('obj', (object,), {'id': call.message.chat.id}),
-                    'from_user': call.from_user,
-                    'message_id': call.message.message_id,
-                    'text': "💣 Мины"
-                })()
-                mines.mines_start(fake_message)
-            except Exception as e:
-                print(f"Ошибка запуска игры Мины: {e}")
-                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
-        
-        except Exception as e:
-            print(f"Общая ошибка в обработке Мины: {e}")
-            bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
+    game_map = {
+        "games_mines": "💣 Мины",
+        "games_tower": "🏰 Башня",
+        "games_darts": "🎯 Дартс",
+        "games_basketball": "🏀 Баскетбол",
+        "games_football": "⚽ Футбол",
+        "games_dice": "🎲 Кости"
+    }
     
-    elif call.data == "games_tower":
+    game_name = game_map.get(call.data, "Игра")
+    
+    try:
         try:
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except:
-                pass
-            
-            try:
-                fake_message = type('obj', (object,), {
-                    'chat': type('obj', (object,), {'id': call.message.chat.id}),
-                    'from_user': call.from_user,
-                    'message_id': call.message.message_id,
-                    'text': "🏰 Башня"
-                })()
-                tower.tower_start(fake_message)
-            except Exception as e:
-                print(f"Ошибка запуска игры Башня: {e}")
-                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
         
+        try:
+            fake_message = type('obj', (object,), {
+                'chat': type('obj', (object,), {'id': call.message.chat.id}),
+                'from_user': call.from_user,
+                'message_id': call.message.message_id,
+                'text': game_name
+            })()
+            
+            if call.data == "games_mines":
+                mines.mines_start(fake_message)
+            elif call.data == "games_tower":
+                tower.tower_start(fake_message)
+            elif call.data == "games_darts":
+                from games import darts_start
+                darts_start(fake_message)
+            elif call.data == "games_basketball":
+                from games import basketball_start
+                basketball_start(fake_message)
+            elif call.data == "games_football":
+                from games import football_start
+                football_start(fake_message)
+            elif call.data == "games_dice":
+                from games import dice_start
+                dice_start(fake_message)
+                
         except Exception as e:
-            print(f"Общая ошибка в обработке Башни: {e}")
-            bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
+            print(f"Ошибка запуска игры {game_name}: {e}")
+            bot.answer_callback_query(call.id, f"❌ Ошибка при запуске игры!")
+    
+    except Exception as e:
+        print(f"Общая ошибка в обработке игры: {e}")
+        bot.answer_callback_query(call.id, "❌ Ошибка при запуске игры!")
 
-@bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw"])
+@bot.callback_query_handler(func=lambda call: call.data in ["deposit", "withdraw", "profile_deposit", "profile_withdraw"])
 def payment_callback_handler(call):
-    if call.data == "deposit":
+    if call.data in ["deposit", "profile_deposit"]:
         bot.answer_callback_query(call.id, "📥 Пополнение баланса временно недоступно!")
-    elif call.data == "withdraw":
+    elif call.data in ["withdraw", "profile_withdraw"]:
         bot.answer_callback_query(call.id, "📤 Вывод средств временно недоступен!")
 
 @bot.callback_query_handler(func=lambda call: call.data == "main_menu")
@@ -183,13 +187,21 @@ def main_menu_callback(call):
     """Обработчик возврата в главное меню"""
     welcome_text = f"✨ <b>Добро пожаловать, {call.from_user.first_name}!</b>"
     
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=welcome_text,
-        parse_mode='HTML',
-        reply_markup=get_main_inline_menu()
-    )
+    try:
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=welcome_text,
+            parse_mode='HTML',
+            reply_markup=get_main_inline_menu()
+        )
+    except:
+        bot.send_message(
+            call.message.chat.id,
+            welcome_text,
+            parse_mode='HTML',
+            reply_markup=get_main_inline_menu()
+        )
 
 @bot.callback_query_handler(func=lambda call: call.data == "show_profile")
 def profile_callback(call):
@@ -227,6 +239,19 @@ def profile_callback(call):
 """
 
     markup = types.InlineKeyboardMarkup(row_width=2)
+    
+    # Кнопки пополнения и вывода
+    if PAYMENTS_ENABLED:
+        markup.row(
+            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
+            types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
+        )
+    else:
+        markup.row(
+            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
+            types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
+        )
+    
     markup.row(
         types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
     )
@@ -335,30 +360,35 @@ def referrals_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == "show_leaders")
 def leaders_callback(call):
     """Обработчик ТОПа из инлайн меню"""
-    from leaders import get_leaders_text
-    
-    leaders_text = get_leaders_text()
-    
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.row(
-        types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
-    )
-    
     try:
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=leaders_text,
-            parse_mode='HTML',
-            reply_markup=markup
+        from leaders import get_leaders_text
+        
+        leaders_text = get_leaders_text()
+        
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.row(
+            types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
         )
-    except:
-        bot.send_message(
-            call.message.chat.id,
-            leaders_text,
-            parse_mode='HTML',
-            reply_markup=markup
-        )
+        
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=leaders_text,
+                parse_mode='HTML',
+                reply_markup=markup
+            )
+        except Exception as e:
+            print(f"Ошибка редактирования ТОПа: {e}")
+            bot.send_message(
+                call.message.chat.id,
+                leaders_text,
+                parse_mode='HTML',
+                reply_markup=markup
+            )
+    except Exception as e:
+        print(f"Ошибка в leaders_callback: {e}")
+        bot.answer_callback_query(call.id, "❌ Ошибка загрузки ТОПа")
 
 @bot.callback_query_handler(func=lambda call: call.data == "show_games")
 def games_callback(call):
@@ -644,6 +674,8 @@ def start_message(message):
                     save_users_data(users_data)
                     print(f"Создан обычный пользователь {user_id} без реферала")
 
+    users_data = load_users_data()
+
     if is_referral_join and referrer_data and is_new_user:
         referrer_id = users_data.get(user_id, {}).get('referrer_id')
         if referrer_id:
@@ -742,6 +774,19 @@ def profile_command(message):
 """
 
     markup = types.InlineKeyboardMarkup(row_width=2)
+    
+    # Кнопки пополнения и вывода
+    if PAYMENTS_ENABLED:
+        markup.row(
+            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
+            types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
+        )
+    else:
+        markup.row(
+            types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
+            types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
+        )
+    
     markup.row(
         types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
     )
@@ -982,6 +1027,19 @@ def menu_handler(message):
 """
 
         markup = types.InlineKeyboardMarkup(row_width=2)
+        
+        # Кнопки пополнения и вывода
+        if PAYMENTS_ENABLED:
+            markup.row(
+                types.InlineKeyboardButton("📥 ПОПОЛНИТЬ", callback_data="profile_deposit"),
+                types.InlineKeyboardButton("📤 ВЫВЕСТИ", callback_data="profile_withdraw")
+            )
+        else:
+            markup.row(
+                types.InlineKeyboardButton("📥 ПОПОЛНИТЬ (скоро)", callback_data="deposit"),
+                types.InlineKeyboardButton("📤 ВЫВЕСТИ (скоро)", callback_data="withdraw")
+            )
+        
         markup.row(
             types.InlineKeyboardButton("◀️ В меню", callback_data="main_menu")
         )
