@@ -3,18 +3,5 @@ aiogram==3.4.1
 python-dotenv==1.0.1
 pytz==2024.1
 aiofiles~=23.2.1
-certifi
-magic-filter
-typing-extensions
-annotated-types
-aiohttp
-aiosignal
-attrs
-frozenlist
-multidict
-yarl
-Werkzeug
-Jinja2
-itsdangerous
-click
-blinker
+--only-binary :all: pydantic-core
+--only-binary :all: pydantic
