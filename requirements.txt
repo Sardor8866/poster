@@ -7,8 +7,6 @@ certifi
 magic-filter
 typing-extensions
 annotated-types
-pydantic
-pydantic-core
 aiohttp
 aiosignal
 attrs
