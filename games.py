@@ -1,11 +1,15 @@
-import telebot
-from telebot import types
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 import random
 import json
 import time
 import threading
 import logging
 import hashlib
+import asyncio
 
 try:
     from leaders import add_game_to_history
@@ -76,7 +80,6 @@ def save_users_data(data):
 def add_referral_bonus(user_id, win_amount):
     """
     Начисляет 6% от выигрыша реферала его рефереру
-    ВАЖНОЕ ИСПРАВЛЕНИЕ: Делаем начисление БЕЗОПАСНЫМ
     """
     try:
         users_data = load_users_data()
@@ -137,34 +140,42 @@ def add_referral_bonus(user_id, win_amount):
         return False
 
 def get_games_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🎲 Кости", callback_data="games_dice"),
-        types.InlineKeyboardButton("🏀 Баскетбол", callback_data="games_basketball"),
-        types.InlineKeyboardButton("⚽ Футбол", callback_data="games_football"),
-        types.InlineKeyboardButton("🎯 Дартс", callback_data="games_darts")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🎲 Кости", callback_data="games_dice"),
+            InlineKeyboardButton(text="🏀 Баскетбол", callback_data="games_basketball")
+        ],
+        [
+            InlineKeyboardButton(text="⚽ Футбол", callback_data="games_football"),
+            InlineKeyboardButton(text="🎯 Дартс", callback_data="games_darts")
+        ]
+    ])
     return markup
 
 def get_bet_selection_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=5)
     bets = ["25", "50", "125", "250", "500"]
-    buttons = [types.InlineKeyboardButton(f"{bet}₽", callback_data=f"games_bet_{bet}") for bet in bets]
-    markup.row(*buttons)
-    markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="games_custom_bet"))
+    buttons = [InlineKeyboardButton(text=f"{bet}₽", callback_data=f"games_bet_{bet}") for bet in bets]
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        buttons,
+        [InlineKeyboardButton(text="📝 Ввести вручную", callback_data="games_custom_bet")]
+    ])
     return markup
 
 def get_dice_selection_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🔴 Чет (1.8x)", callback_data="dice_even"),
-        types.InlineKeyboardButton("⚫ Нечет (1.8x)", callback_data="dice_odd"),
-        types.InlineKeyboardButton("📈 Больше 3 (1.8x)", callback_data="dice_high"),
-        types.InlineKeyboardButton("📉 Меньше 4 (1.8x)", callback_data="dice_low")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔴 Чет (1.8x)", callback_data="dice_even"),
+            InlineKeyboardButton(text="⚫ Нечет (1.8x)", callback_data="dice_odd")
+        ],
+        [
+            InlineKeyboardButton(text="📈 Больше 3 (1.8x)", callback_data="dice_high"),
+            InlineKeyboardButton(text="📉 Меньше 4 (1.8x)", callback_data="dice_low")
+        ]
+    ])
     return markup
 
-def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
+async def play_dice_game_chat(bot: Bot, message: Message, bet_type: str, bet_amount: float, user_id: str, username: str):
     """Игра в кости через чат-команды"""
     try:
         users_data = load_users_data()
@@ -172,24 +183,24 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         if user_id not in users_data:
             users_data[user_id] = {'balance': 0}
             save_users_data(users_data)
-            bot.reply_to(message, "❌ У вас нет баланса. Начните с /start")
+            await message.reply("❌ У вас нет баланса. Начните с /start")
             return
         
         balance = users_data[user_id].get('balance', 0)
         
         if bet_amount < MIN_BET_DICE:
-            bot.reply_to(message, f"❌ Минимальная ставка: {MIN_BET_DICE}₽!")
+            await message.reply(f"❌ Минимальная ставка: {MIN_BET_DICE}₽!")
             return
         if bet_amount > balance:
-            bot.reply_to(message, "❌ Недостаточно средств!")
+            await message.reply("❌ Недостаточно средств!")
             return
         
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        dice_msg = bot.send_dice(message.chat.id, emoji='🎲', reply_to_message_id=message.message_id)
+        dice_msg = await message.answer_dice(emoji='🎲', reply_to_message_id=message.message_id)
         
-        time.sleep(3)
+        await asyncio.sleep(3)
         
         dice_value = dice_msg.dice.value
         
@@ -264,22 +275,22 @@ def play_dice_game_chat(bot, message, bet_type, bet_amount, user_id, username):
 
 💰 Баланс: <b>{round(users_data[user_id].get('balance', 0), 2)}₽</b>"""
         
-        bot.reply_to(dice_msg, result_text, parse_mode='HTML')
+        await dice_msg.reply(result_text, parse_mode='HTML')
         
     except Exception as e:
         logging.error(f"Ошибка в play_dice_game_chat: {e}")
-        bot.reply_to(message, "❌ Произошла ошибка во время игры. Попробуйте еще раз.")
+        await message.reply("❌ Произошла ошибка во время игры. Попробуйте еще раз.")
 
-def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
+async def play_dice_game(bot: Bot, call: CallbackQuery, bet_type: str, bet_amount: float, user_id: str, session_token: str):
     try:
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
                 return
             active_games[user_id] = session_token
 
-        dice_msg = bot.send_dice(call.message.chat.id, emoji='🎲')
+        dice_msg = await call.message.answer_dice(emoji='🎲')
 
-        time.sleep(3)
+        await asyncio.sleep(3)
 
         dice_value = dice_msg.dice.value
         users_data = load_users_data()
@@ -353,11 +364,7 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
 
-        bot.send_message(
-            call.message.chat.id,
-            result_text,
-            parse_mode='HTML'
-        )
+        await call.message.answer(result_text, parse_mode='HTML')
 
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
@@ -378,10 +385,7 @@ def play_dice_game(bot, call, bet_type, bet_amount, user_id, session_token):
                 del game_session_tokens[user_id]
 
         try:
-            bot.send_message(
-                call.message.chat.id,
-                "❌ Произошла ошибка во время игры. Попробуйте еще раз."
-            )
+            await call.message.answer("❌ Произошла ошибка во время игры. Попробуйте еще раз.")
         except Exception as e2:
             logging.error(f"Не удалось отправить сообщение об ошибке: {e2}")
 
@@ -407,15 +411,18 @@ def get_dice_bet_name_chat(bet_type):
     return bet_type
 
 def get_basketball_selection_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=3)
-    markup.add(
-        types.InlineKeyboardButton("❌ Мимо (2x)", callback_data="basketball_miss"),
-        types.InlineKeyboardButton("🟢 Гол (2x)", callback_data="basketball_goal"),
-        types.InlineKeyboardButton("🎯 3-очковый (3x)", callback_data="basketball_three")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❌ Мимо (2x)", callback_data="basketball_miss"),
+            InlineKeyboardButton(text="🟢 Гол (2x)", callback_data="basketball_goal")
+        ],
+        [
+            InlineKeyboardButton(text="🎯 3-очковый (3x)", callback_data="basketball_three")
+        ]
+    ])
     return markup
 
-def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, username):
+async def play_basketball_game_chat(bot: Bot, message: Message, bet_type: str, bet_amount: float, user_id: str, username: str):
     """Игра в баскетбол через чат-команды"""
     try:
         users_data = load_users_data()
@@ -423,24 +430,24 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
         if user_id not in users_data:
             users_data[user_id] = {'balance': 0}
             save_users_data(users_data)
-            bot.reply_to(message, "❌ У вас нет баланса. Начните с /start")
+            await message.reply("❌ У вас нет баланса. Начните с /start")
             return
         
         balance = users_data[user_id].get('balance', 0)
         
         if bet_amount < MIN_BET_OTHER:
-            bot.reply_to(message, f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
+            await message.reply(f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
             return
         if bet_amount > balance:
-            bot.reply_to(message, "❌ Недостаточно средств!")
+            await message.reply("❌ Недостаточно средств!")
             return
         
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        basketball_msg = bot.send_dice(message.chat.id, emoji='🏀', reply_to_message_id=message.message_id)
+        basketball_msg = await message.answer_dice(emoji='🏀', reply_to_message_id=message.message_id)
         
-        time.sleep(3)
+        await asyncio.sleep(3)
         
         dice_value = basketball_msg.dice.value
         
@@ -522,22 +529,22 @@ def play_basketball_game_chat(bot, message, bet_type, bet_amount, user_id, usern
 
 💰 Баланс: <b>{round(users_data[user_id].get('balance', 0), 2)}₽</b>"""
         
-        bot.reply_to(basketball_msg, result_text, parse_mode='HTML')
+        await basketball_msg.reply(result_text, parse_mode='HTML')
         
     except Exception as e:
         logging.error(f"Ошибка в play_basketball_game_chat: {e}")
-        bot.reply_to(message, "❌ Произошла ошибка во время игры. Попробуйте еще раз.")
+        await message.reply("❌ Произошла ошибка во время игры. Попробуйте еще раз.")
 
-def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token):
+async def play_basketball_game(bot: Bot, call: CallbackQuery, bet_type: str, bet_amount: float, user_id: str, session_token: str):
     try:
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
                 return
             active_games[user_id] = session_token
 
-        basketball_msg = bot.send_dice(call.message.chat.id, emoji='🏀')
+        basketball_msg = await call.message.answer_dice(emoji='🏀')
 
-        time.sleep(3)
+        await asyncio.sleep(3)
 
         dice_value = basketball_msg.dice.value
         users_data = load_users_data()
@@ -618,11 +625,7 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
 
-        bot.send_message(
-            call.message.chat.id,
-            result_text,
-            parse_mode='HTML'
-        )
+        await call.message.answer(result_text, parse_mode='HTML')
 
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
@@ -643,10 +646,7 @@ def play_basketball_game(bot, call, bet_type, bet_amount, user_id, session_token
                 del game_session_tokens[user_id]
 
         try:
-            bot.send_message(
-                call.message.chat.id,
-                "❌ Произошла ошибка во время игры. Попробуйте еще раз."
-            )
+            await call.message.answer("❌ Произошла ошибка во время игры. Попробуйте еще раз.")
         except Exception as e2:
             logging.error(f"Не удалось отправить сообщение об ошибке: {e2}")
 
@@ -678,14 +678,15 @@ def get_basketball_result_emoji(result):
     return emojis.get(result, result)
 
 def get_football_selection_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("❌ Мимо (1.8x)", callback_data="football_miss"),
-        types.InlineKeyboardButton("🟢 Гол (1.4x)", callback_data="football_goal")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❌ Мимо (1.8x)", callback_data="football_miss"),
+            InlineKeyboardButton(text="🟢 Гол (1.4x)", callback_data="football_goal")
+        ]
+    ])
     return markup
 
-def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, username):
+async def play_football_game_chat(bot: Bot, message: Message, bet_type: str, bet_amount: float, user_id: str, username: str):
     """Игра в футбол через чат-команды"""
     try:
         users_data = load_users_data()
@@ -693,24 +694,24 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
         if user_id not in users_data:
             users_data[user_id] = {'balance': 0}
             save_users_data(users_data)
-            bot.reply_to(message, "❌ У вас нет баланса. Начните с /start")
+            await message.reply("❌ У вас нет баланса. Начните с /start")
             return
         
         balance = users_data[user_id].get('balance', 0)
         
         if bet_amount < MIN_BET_OTHER:
-            bot.reply_to(message, f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
+            await message.reply(f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
             return
         if bet_amount > balance:
-            bot.reply_to(message, "❌ Недостаточно средств!")
+            await message.reply("❌ Недостаточно средств!")
             return
         
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        football_msg = bot.send_dice(message.chat.id, emoji='⚽', reply_to_message_id=message.message_id)
+        football_msg = await message.answer_dice(emoji='⚽', reply_to_message_id=message.message_id)
         
-        time.sleep(3.5)
+        await asyncio.sleep(3.5)
         
         dice_value = football_msg.dice.value
         
@@ -787,22 +788,22 @@ def play_football_game_chat(bot, message, bet_type, bet_amount, user_id, usernam
 
 💰 Баланс: <b>{round(users_data[user_id].get('balance', 0), 2)}₽</b>"""
         
-        bot.reply_to(football_msg, result_text, parse_mode='HTML')
+        await football_msg.reply(result_text, parse_mode='HTML')
         
     except Exception as e:
         logging.error(f"Ошибка в play_football_game_chat: {e}")
-        bot.reply_to(message, "❌ Произошла ошибка во время игры. Попробуйте еще раз.")
+        await message.reply("❌ Произошла ошибка во время игры. Попробуйте еще раз.")
 
-def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
+async def play_football_game(bot: Bot, call: CallbackQuery, bet_type: str, bet_amount: float, user_id: str, session_token: str):
     try:
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
                 return
             active_games[user_id] = session_token
 
-        football_msg = bot.send_dice(call.message.chat.id, emoji='⚽')
+        football_msg = await call.message.answer_dice(emoji='⚽')
 
-        time.sleep(3.5)
+        await asyncio.sleep(3.5)
 
         dice_value = football_msg.dice.value
         users_data = load_users_data()
@@ -877,11 +878,7 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
 
-        bot.send_message(
-            call.message.chat.id,
-            result_text,
-            parse_mode='HTML'
-        )
+        await call.message.answer(result_text, parse_mode='HTML')
 
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
@@ -902,10 +899,7 @@ def play_football_game(bot, call, bet_type, bet_amount, user_id, session_token):
                 del game_session_tokens[user_id]
 
         try:
-            bot.send_message(
-                call.message.chat.id,
-                "❌ Произошла ошибка во время игры. Попробуйте еще раз."
-            )
+            await call.message.answer("❌ Произошла ошибка во время игры. Попробуйте еще раз.")
         except Exception as e2:
             logging.error(f"Не удалось отправить сообщение об ошибке: {e2}")
 
@@ -933,16 +927,19 @@ def get_football_result_emoji(result):
     return emojis.get(result, result)
 
 def get_darts_selection_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("❌ Мимо (2.5x)", callback_data="darts_miss"),
-        types.InlineKeyboardButton("🔴 Красное (1.8x)", callback_data="darts_red"),
-        types.InlineKeyboardButton("⚪ Белое (1.8x)", callback_data="darts_white"),
-        types.InlineKeyboardButton("🎯 Центр (4.3x)", callback_data="darts_bullseye")
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❌ Мимо (2.5x)", callback_data="darts_miss"),
+            InlineKeyboardButton(text="🔴 Красное (1.8x)", callback_data="darts_red")
+        ],
+        [
+            InlineKeyboardButton(text="⚪ Белое (1.8x)", callback_data="darts_white"),
+            InlineKeyboardButton(text="🎯 Центр (4.3x)", callback_data="darts_bullseye")
+        ]
+    ])
     return markup
 
-def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
+async def play_darts_game_chat(bot: Bot, message: Message, bet_type: str, bet_amount: float, user_id: str, username: str):
     """Игра в дартс через чат-команды"""
     try:
         users_data = load_users_data()
@@ -950,24 +947,24 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
         if user_id not in users_data:
             users_data[user_id] = {'balance': 0}
             save_users_data(users_data)
-            bot.reply_to(message, "❌ У вас нет баланса. Начните с /start")
+            await message.reply("❌ У вас нет баланса. Начните с /start")
             return
         
         balance = users_data[user_id].get('balance', 0)
         
         if bet_amount < MIN_BET_OTHER:
-            bot.reply_to(message, f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
+            await message.reply(f"❌ Минимальная ставка: {MIN_BET_OTHER}₽!")
             return
         if bet_amount > balance:
-            bot.reply_to(message, "❌ Недостаточно средств!")
+            await message.reply("❌ Недостаточно средств!")
             return
         
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
         save_users_data(users_data)
         
-        darts_msg = bot.send_dice(message.chat.id, emoji='🎯', reply_to_message_id=message.message_id)
+        darts_msg = await message.answer_dice(emoji='🎯', reply_to_message_id=message.message_id)
         
-        time.sleep(3)
+        await asyncio.sleep(3)
         
         dice_value = darts_msg.dice.value
         
@@ -1061,22 +1058,22 @@ def play_darts_game_chat(bot, message, bet_type, bet_amount, user_id, username):
 
 💰 Баланс: <b>{round(users_data[user_id].get('balance', 0), 2)}₽</b>"""
         
-        bot.reply_to(darts_msg, result_text, parse_mode='HTML')
+        await darts_msg.reply(result_text, parse_mode='HTML')
         
     except Exception as e:
         logging.error(f"Ошибка в play_darts_game_chat: {e}")
-        bot.reply_to(message, "❌ Произошла ошибка во время игры. Попробуйте еще раз.")
+        await message.reply("❌ Произошла ошибка во время игры. Попробуйте еще раз.")
 
-def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
+async def play_darts_game(bot: Bot, call: CallbackQuery, bet_type: str, bet_amount: float, user_id: str, session_token: str):
     try:
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
                 return
             active_games[user_id] = session_token
 
-        darts_msg = bot.send_dice(call.message.chat.id, emoji='🎯')
+        darts_msg = await call.message.answer_dice(emoji='🎯')
 
-        time.sleep(3)
+        await asyncio.sleep(3)
 
         dice_value = darts_msg.dice.value
         users_data = load_users_data()
@@ -1168,11 +1165,7 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
 
 💰 Баланс: <b>{round(users_data[user_id]['balance'], 2)}₽</b>"""
 
-        bot.send_message(
-            call.message.chat.id,
-            result_text,
-            parse_mode='HTML'
-        )
+        await call.message.answer(result_text, parse_mode='HTML')
 
         with bet_lock:
             if user_id in active_games and active_games[user_id] == session_token:
@@ -1193,10 +1186,7 @@ def play_darts_game(bot, call, bet_type, bet_amount, user_id, session_token):
                 del game_session_tokens[user_id]
 
         try:
-            bot.send_message(
-                call.message.chat.id,
-                "❌ Произошла ошибка во время игры. Попробуйте еще раз."
-            )
+            await call.message.answer("❌ Произошла ошибка во время игры. Попробуйте еще раз.")
         except Exception as e2:
             logging.error(f"Не удалось отправить сообщение об ошибке: {e2}")
 
@@ -1231,17 +1221,22 @@ def get_darts_result_emoji(result):
     }
     return emojis.get(result, result)
 
-def process_custom_bet_games(message):
+class GamesStates(StatesGroup):
+    waiting_for_custom_bet = State()
+
+async def process_custom_bet_games(message: Message, state: FSMContext):
     try:
         user_id = str(message.from_user.id)
 
         if not rate_limit(user_id):
-            bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
+            await message.answer("❌ Слишком быстро! Подождите 0.4 секунды.")
+            await state.clear()
             return
 
         with bet_lock:
             if user_id in active_games:
-                bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
+                await message.answer("❌ У вас уже есть активная игра!")
+                await state.clear()
                 return
 
         bet_amount = float(message.text)
@@ -1254,16 +1249,19 @@ def process_custom_bet_games(message):
 
         with bet_lock:
             if user_id not in active_bets:
-                bot.send_message(message.chat.id, "❌ Сначала выберите игру!")
+                await message.answer("❌ Сначала выберите игру!")
+                await state.clear()
                 return
             game_type = active_bets[user_id]['game_type']
             min_bet = get_min_bet(game_type)
 
         if bet_amount < min_bet:
-            bot.send_message(message.chat.id, f"❌ Минимальная ставка: {min_bet}₽!")
+            await message.answer(f"❌ Минимальная ставка: {min_bet}₽!")
+            await state.clear()
             return
         if bet_amount > balance:
-            bot.send_message(message.chat.id, "❌ Недостаточно средств!")
+            await message.answer("❌ Недостаточно средств!")
+            await state.clear()
             return
 
         users_data[user_id]['balance'] = round(balance - bet_amount, 2)
@@ -1276,50 +1274,59 @@ def process_custom_bet_games(message):
             game_session_tokens[user_id] = session_token
 
             if game_type == "dice":
-                bot.send_message(message.chat.id,
-                               f"""<b>🎲 Кости</b>
+                await message.answer(
+                    f"""<b>🎲 Кости</b>
 
 <blockquote>💵 Сумма ставки: {bet_amount}₽</blockquote>
 
 Выберите исход:""",
-                               parse_mode='HTML', reply_markup=get_dice_selection_keyboard())
+                    parse_mode='HTML',
+                    reply_markup=get_dice_selection_keyboard()
+                )
             elif game_type == "basketball":
-                bot.send_message(message.chat.id,
-                               f"""<b>🏀 Баскетбол</b>
+                await message.answer(
+                    f"""<b>🏀 Баскетбол</b>
 
 <blockquote>💵 Сумма ставки: {bet_amount}₽</blockquote>
 
 Выберите исход:""",
-                               parse_mode='HTML', reply_markup=get_basketball_selection_keyboard())
+                    parse_mode='HTML',
+                    reply_markup=get_basketball_selection_keyboard()
+                )
             elif game_type == "football":
-                bot.send_message(message.chat.id,
-                               f"""<b>⚽ Футбол</b>
+                await message.answer(
+                    f"""<b>⚽ Футбол</b>
 
 <blockquote>💵 Сумма ставки: {bet_amount}₽</blockquote>
 
 Выберите исход:""",
-                               parse_mode='HTML', reply_markup=get_football_selection_keyboard())
+                    parse_mode='HTML',
+                    reply_markup=get_football_selection_keyboard()
+                )
             elif game_type == "darts":
-                bot.send_message(message.chat.id,
-                               f"""<b>🎯 Дартс</b>
+                await message.answer(
+                    f"""<b>🎯 Дартс</b>
 
 <blockquote>💵 Сумма ставки: {bet_amount}₽</blockquote>
 
 Выберите исход:""",
-                               parse_mode='HTML', reply_markup=get_darts_selection_keyboard())
+                    parse_mode='HTML',
+                    reply_markup=get_darts_selection_keyboard()
+                )
+        
+        await state.clear()
 
     except ValueError:
-        bot.send_message(message.chat.id, "❌ Введите корректную сумму!")
+        await message.answer("❌ Введите корректную сумму!")
+        await state.clear()
     except Exception as e:
         logging.error(f"Ошибка в process_custom_bet_games: {e}")
-        bot.send_message(message.chat.id, "❌ Произошла ошибка!")
+        await message.answer("❌ Произошла ошибка!")
+        await state.clear()
 
-def register_games_handlers(bot_instance):
-    global bot
-    bot = bot_instance
-
-    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['чет', 'even', 'нечет', 'odd', 'больше', 'more', 'high', 'меньше', 'less', 'low'] and len(message.text.strip().split()) >= 2)
-    def dice_no_slash_commands(message):
+def register_games_handlers(dp: Dispatcher):
+    @dp.message(F.text.regexp(r'^(чет|even|нечет|odd|больше|more|high|меньше|less|low)\s+\d+'))
+    async def dice_no_slash_commands(message: Message):
         try:
             text = message.text.lower()
             user_id = str(message.from_user.id)
@@ -1350,140 +1357,130 @@ def register_games_handlers(bot_instance):
                 return
             
             if bet_amount < MIN_BET_DICE:
-                bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
+                await message.reply(f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            threading.Thread(
-                target=play_dice_game_chat,
-                args=(bot, message, bet_type, bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_dice_game_chat(message.bot, message, bet_type, bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в dice_no_slash_commands: {e}")
 
-    @bot.message_handler(commands=['чет', 'even'])
-    def dice_even_command(message):
+    @dp.message(Command('чет', 'even'))
+    async def dice_even_command(message: Message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
             if len(message.text.split()) < 2:
-                bot.reply_to(message, "❌ Используйте: /чет [сумма] или /even [сумма]")
+                await message.reply("❌ Используйте: /чет [сумма] или /even [сумма]")
                 return
             
             try:
                 bet_amount = float(message.text.split()[1])
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_amount < MIN_BET_DICE:
-                bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
+                await message.reply(f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            threading.Thread(
-                target=play_dice_game_chat,
-                args=(bot, message, "чет", bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_dice_game_chat(message.bot, message, "чет", bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в dice_even_command: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(commands=['нечет', 'odd'])
-    def dice_odd_command(message):
+    @dp.message(Command('нечет', 'odd'))
+    async def dice_odd_command(message: Message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
             if len(message.text.split()) < 2:
-                bot.reply_to(message, "❌ Используйте: /нечет [сумма] или /odd [сумма]")
+                await message.reply("❌ Используйте: /нечет [сумма] или /odd [сумма]")
                 return
             
             try:
                 bet_amount = float(message.text.split()[1])
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_amount < MIN_BET_DICE:
-                bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
+                await message.reply(f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            threading.Thread(
-                target=play_dice_game_chat,
-                args=(bot, message, "нечет", bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_dice_game_chat(message.bot, message, "нечет", bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в dice_odd_command: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(commands=['больше', 'more'])
-    def dice_high_command(message):
+    @dp.message(Command('больше', 'more'))
+    async def dice_high_command(message: Message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
             if len(message.text.split()) < 2:
-                bot.reply_to(message, "❌ Используйте: /больше [сумма] или /more [сумма]")
+                await message.reply("❌ Используйте: /больше [сумма] или /more [сумма]")
                 return
             
             try:
                 bet_amount = float(message.text.split()[1])
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_amount < MIN_BET_DICE:
-                bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
+                await message.reply(f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            threading.Thread(
-                target=play_dice_game_chat,
-                args=(bot, message, "больше", bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_dice_game_chat(message.bot, message, "больше", bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в dice_high_command: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(commands=['меньше', 'less'])
-    def dice_low_command(message):
+    @dp.message(Command('меньше', 'less'))
+    async def dice_low_command(message: Message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
             if len(message.text.split()) < 2:
-                bot.reply_to(message, "❌ Используйте: /меньше [сумма] или /less [сумма]")
+                await message.reply("❌ Используйте: /меньше [сумма] или /less [сумма]")
                 return
             
             try:
                 bet_amount = float(message.text.split()[1])
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_amount < MIN_BET_DICE:
-                bot.reply_to(message, f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
+                await message.reply(f"❌ Минимальная ставка для костей: {MIN_BET_DICE}₽!")
                 return
             
-            threading.Thread(
-                target=play_dice_game_chat,
-                args=(bot, message, "меньше", bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_dice_game_chat(message.bot, message, "меньше", bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в dice_low_command: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['баскетбол', 'баскет', 'basketball', 'basket'] and len(message.text.strip().split()) >= 3)
-    def basketball_no_slash_commands(message):
+    @dp.message(F.text.regexp(r'^(баскетбол|баскет|basketball|basket)\s+(мимо|miss|гол|goal|3-очковый|three|тройка)\s+\d+'))
+    async def basketball_no_slash_commands(message: Message):
         try:
             text = message.text.lower()
             user_id = str(message.from_user.id)
@@ -1491,7 +1488,7 @@ def register_games_handlers(bot_instance):
             
             parts = text.split()
             if len(parts) < 3:
-                bot.reply_to(message, "❌ Используйте: баскетбол [тип] [сумма]\nТипы: мимо, гол, 3-очковый")
+                await message.reply("❌ Используйте: баскетбол [тип] [сумма]\nТипы: мимо, гол, 3-очковый")
                 return
             
             bet_type_word = parts[1].lower()
@@ -1504,7 +1501,7 @@ def register_games_handlers(bot_instance):
             }
             
             if bet_type_word not in bet_type_map:
-                bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, гол, 3-очковый")
+                await message.reply("❌ Неверный тип ставки! Используйте: мимо, гол, 3-очковый")
                 return
             
             bet_type = bet_type_map[bet_type_word]
@@ -1512,46 +1509,44 @@ def register_games_handlers(bot_instance):
             try:
                 bet_amount = float(bet_amount_str)
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_amount < MIN_BET_OTHER:
-                bot.reply_to(message, f"❌ Минимальная ставка для баскетбола: {MIN_BET_OTHER}₽!")
+                await message.reply(f"❌ Минимальная ставка для баскетбола: {MIN_BET_OTHER}₽!")
                 return
             
-            threading.Thread(
-                target=play_basketball_game_chat,
-                args=(bot, message, bet_type, bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_basketball_game_chat(message.bot, message, bet_type, bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в basketball_no_slash_commands: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(commands=['баскетбол', 'basketball'])
-    def basketball_command(message):
+    @dp.message(Command('баскетбол', 'basketball'))
+    async def basketball_command(message: Message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
             if len(message.text.split()) < 3:
-                bot.reply_to(message, "❌ Используйте: /баскетбол [тип] [сумма]\nТипы: мимо, гол, 3-очковый")
+                await message.reply("❌ Используйте: /баскетбол [тип] [сумма]\nТипы: мимо, гол, 3-очковый")
                 return
             
             bet_type = message.text.split()[1].lower()
             try:
                 bet_amount = float(message.text.split()[2])
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_type not in ["мимо", "гол", "3-очковый", "miss", "goal", "three"]:
-                bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, гол, 3-очковый")
+                await message.reply("❌ Неверный тип ставки! Используйте: мимо, гол, 3-очковый")
                 return
             
             if bet_amount < MIN_BET_OTHER:
-                bot.reply_to(message, f"❌ Минимальная ставка для баскетбола: {MIN_BET_OTHER}₽!")
+                await message.reply(f"❌ Минимальная ставка для баскетбола: {MIN_BET_OTHER}₽!")
                 return
             
             if bet_type in ["miss"]:
@@ -1561,18 +1556,16 @@ def register_games_handlers(bot_instance):
             elif bet_type in ["three"]:
                 bet_type = "3-очковый"
             
-            threading.Thread(
-                target=play_basketball_game_chat,
-                args=(bot, message, bet_type, bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_basketball_game_chat(message.bot, message, bet_type, bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в basketball_command: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['футбол', 'фут', 'football', 'foot'] and len(message.text.strip().split()) >= 3)
-    def football_no_slash_commands(message):
+    @dp.message(F.text.regexp(r'^(футбол|фут|football|foot)\s+(мимо|miss|гол|goal)\s+\d+'))
+    async def football_no_slash_commands(message: Message):
         try:
             text = message.text.lower()
             user_id = str(message.from_user.id)
@@ -1580,7 +1573,7 @@ def register_games_handlers(bot_instance):
             
             parts = text.split()
             if len(parts) < 3:
-                bot.reply_to(message, "❌ Используйте: футбол [тип] [сумма]\nТипы: мимо, гол")
+                await message.reply("❌ Используйте: футбол [тип] [сумма]\nТипы: мимо, гол")
                 return
             
             bet_type_word = parts[1].lower()
@@ -1592,7 +1585,7 @@ def register_games_handlers(bot_instance):
             }
             
             if bet_type_word not in bet_type_map:
-                bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, гол")
+                await message.reply("❌ Неверный тип ставки! Используйте: мимо, гол")
                 return
             
             bet_type = bet_type_map[bet_type_word]
@@ -1600,46 +1593,44 @@ def register_games_handlers(bot_instance):
             try:
                 bet_amount = float(bet_amount_str)
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_amount < MIN_BET_OTHER:
-                bot.reply_to(message, f"❌ Минимальная ставка для футбола: {MIN_BET_OTHER}₽!")
+                await message.reply(f"❌ Минимальная ставка для футбола: {MIN_BET_OTHER}₽!")
                 return
             
-            threading.Thread(
-                target=play_football_game_chat,
-                args=(bot, message, bet_type, bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_football_game_chat(message.bot, message, bet_type, bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в football_no_slash_commands: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(commands=['футбол', 'football'])
-    def football_command(message):
+    @dp.message(Command('футбол', 'football'))
+    async def football_command(message: Message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
             if len(message.text.split()) < 3:
-                bot.reply_to(message, "❌ Используйте: /футбол [тип] [сумма]\nТипы: мимо, гол")
+                await message.reply("❌ Используйте: /футбол [тип] [сумма]\nТипы: мимо, гол")
                 return
             
             bet_type = message.text.split()[1].lower()
             try:
                 bet_amount = float(message.text.split()[2])
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_type not in ["мимо", "гол", "miss", "goal"]:
-                bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, гол")
+                await message.reply("❌ Неверный тип ставки! Используйте: мимо, гол")
                 return
             
             if bet_amount < MIN_BET_OTHER:
-                bot.reply_to(message, f"❌ Минимальная ставка для футбола: {MIN_BET_OTHER}₽!")
+                await message.reply(f"❌ Минимальная ставка для футбола: {MIN_BET_OTHER}₽!")
                 return
             
             if bet_type in ["miss"]:
@@ -1647,18 +1638,16 @@ def register_games_handlers(bot_instance):
             elif bet_type in ["goal"]:
                 bet_type = "гол"
             
-            threading.Thread(
-                target=play_football_game_chat,
-                args=(bot, message, bet_type, bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_football_game_chat(message.bot, message, bet_type, bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в football_command: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.text.strip().split()[0].lower() in ['дартс', 'дарт', 'darts', 'dart'] and len(message.text.strip().split()) >= 3)
-    def darts_no_slash_commands(message):
+    @dp.message(F.text.regexp(r'^(дартс|дарт|darts|dart)\s+(мимо|miss|красное|red|красный|белое|white|белый|центр|bullseye|яблочко)\s+\d+'))
+    async def darts_no_slash_commands(message: Message):
         try:
             text = message.text.lower()
             user_id = str(message.from_user.id)
@@ -1666,7 +1655,7 @@ def register_games_handlers(bot_instance):
             
             parts = text.split()
             if len(parts) < 3:
-                bot.reply_to(message, "❌ Используйте: дартс [тип] [сумма]\nТипы: мимо, красное, белое, центр")
+                await message.reply("❌ Используйте: дартс [тип] [сумма]\nТипы: мимо, красное, белое, центр")
                 return
             
             bet_type_word = parts[1].lower()
@@ -1680,7 +1669,7 @@ def register_games_handlers(bot_instance):
             }
             
             if bet_type_word not in bet_type_map:
-                bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, красное, белое, центр")
+                await message.reply("❌ Неверный тип ставки! Используйте: мимо, красное, белое, центр")
                 return
             
             bet_type = bet_type_map[bet_type_word]
@@ -1688,47 +1677,45 @@ def register_games_handlers(bot_instance):
             try:
                 bet_amount = float(bet_amount_str)
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             if bet_amount < MIN_BET_OTHER:
-                bot.reply_to(message, f"❌ Минимальная ставка для дартса: {MIN_BET_OTHER}₽!")
+                await message.reply(f"❌ Минимальная ставка для дартса: {MIN_BET_OTHER}₽!")
                 return
             
-            threading.Thread(
-                target=play_darts_game_chat,
-                args=(bot, message, bet_type, bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_darts_game_chat(message.bot, message, bet_type, bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в darts_no_slash_commands: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.message_handler(commands=['дартс', 'darts'])
-    def darts_command(message):
+    @dp.message(Command('дартс', 'darts'))
+    async def darts_command(message: Message):
         try:
             user_id = str(message.from_user.id)
             username = message.from_user.username
             
             if len(message.text.split()) < 3:
-                bot.reply_to(message, "❌ Используйте: /дартс [тип] [сумма]\nТипы: мимо, красное, белое, центр")
+                await message.reply("❌ Используйте: /дартс [тип] [сумма]\nТипы: мимо, красное, белое, центр")
                 return
             
             bet_type = message.text.split()[1].lower()
             try:
                 bet_amount = float(message.text.split()[2])
             except ValueError:
-                bot.reply_to(message, "❌ Введите корректную сумму!")
+                await message.reply("❌ Введите корректную сумму!")
                 return
             
             valid_types = ["мимо", "красное", "белое", "центр", "miss", "red", "white", "bullseye"]
             if bet_type not in valid_types:
-                bot.reply_to(message, "❌ Неверный тип ставки! Используйте: мимо, красное, белое, центр")
+                await message.reply("❌ Неверный тип ставки! Используйте: мимо, красное, белое, центр")
                 return
             
             if bet_amount < MIN_BET_OTHER:
-                bot.reply_to(message, f"❌ Минимальная ставка для дартса: {MIN_BET_OTHER}₽!")
+                await message.reply(f"❌ Минимальная ставка для дартса: {MIN_BET_OTHER}₽!")
                 return
             
             type_map = {
@@ -1740,28 +1727,26 @@ def register_games_handlers(bot_instance):
             if bet_type in type_map:
                 bet_type = type_map[bet_type]
             
-            threading.Thread(
-                target=play_darts_game_chat,
-                args=(bot, message, bet_type, bet_amount, user_id, username),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                play_darts_game_chat(message.bot, message, bet_type, bet_amount, user_id, username)
+            )
             
         except Exception as e:
             logging.error(f"Ошибка в darts_command: {e}")
-            bot.reply_to(message, "❌ Произошла ошибка!")
+            await message.reply("❌ Произошла ошибка!")
 
-    @bot.callback_query_handler(func=lambda call: call.data in ["games_dice", "games_basketball", "games_football", "games_darts"])
-    def handle_game_selection(call):
+    @dp.callback_query(F.data.in_(["games_dice", "games_basketball", "games_football", "games_darts"]))
+    async def handle_game_selection(call: CallbackQuery):
         try:
             user_id = str(call.from_user.id)
 
             if not rate_limit(user_id):
-                bot.answer_callback_query(call.id, "❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
+                await call.answer("❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
                 return
 
             with bet_lock:
                 if user_id in active_games:
-                    bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                    await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                     return
 
             users_data = load_users_data()
@@ -1785,14 +1770,12 @@ def register_games_handlers(bot_instance):
             with bet_lock:
                 active_bets[user_id] = {'game_type': game_type}
 
-            bot.edit_message_text(
+            await call.message.edit_text(
                 f"""<b>{game_name}</b>
 
 <blockquote>💵 Баланс: {balance_rounded}₽</blockquote>
 
 Выберите сумму ставки:""",
-                call.message.chat.id,
-                call.message.message_id,
                 parse_mode='HTML',
                 reply_markup=get_bet_selection_keyboard()
             )
@@ -1800,22 +1783,22 @@ def register_games_handlers(bot_instance):
         except Exception as e:
             logging.error(f"Ошибка в handle_game_selection: {e}")
             try:
-                bot.answer_callback_query(call.id, "❌ Произошла ошибка при запуске игры!")
+                await call.answer("❌ Произошла ошибка при запуске игры!")
             except:
                 pass
 
-    @bot.message_handler(func=lambda message: message.text in ["🎲 Кости", "🏀 Баскетбол", "🎯 Дартс", "⚽ Футбол"])
-    def games_start(message):
+    @dp.message(F.text.in_(["🎲 Кости", "🏀 Баскетбол", "🎯 Дартс", "⚽ Футбол"]))
+    async def games_start(message: Message):
         try:
             user_id = str(message.from_user.id)
 
             if not rate_limit(user_id):
-                bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
+                await message.answer("❌ Слишком быстро! Подождите 0.4 секунды.")
                 return
 
             with bet_lock:
                 if user_id in active_games:
-                    bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
+                    await message.answer("❌ У вас уже есть активная игра!")
                     return
 
             users_data = load_users_data()
@@ -1841,8 +1824,7 @@ def register_games_handlers(bot_instance):
                     active_bets[user_id] = {'game_type': 'darts'}
                     game_name = "🎯 Дартс"
 
-            bot.send_message(
-                message.chat.id,
+            await message.answer(
                 f"""<b>{game_name}</b>
 
 <blockquote>💵 Баланс: {balance_rounded}₽</blockquote>
@@ -1853,20 +1835,20 @@ def register_games_handlers(bot_instance):
             )
         except Exception as e:
             logging.error(f"Ошибка в games_start: {e}")
-            bot.send_message(message.chat.id, "❌ Произошла ошибка при запуске игры!")
+            await message.answer("❌ Произошла ошибка при запуске игры!")
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('games_') and call.data not in ['games_mines', 'games_tower'])
-    def games_callback_handler(call):
+    @dp.callback_query(F.data.startswith('games_') & ~F.data.in_(['games_mines', 'games_tower']))
+    async def games_callback_handler(call: CallbackQuery, state: FSMContext):
         try:
             user_id = str(call.from_user.id)
 
             if not rate_limit(user_id):
-                bot.answer_callback_query(call.id, "❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
+                await call.answer("❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
                 return
 
             with bet_lock:
                 if user_id in active_games:
-                    bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                    await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                     return
 
             users_data = load_users_data()
@@ -1876,12 +1858,12 @@ def register_games_handlers(bot_instance):
 
                 balance = users_data[user_id].get('balance', 0)
                 if bet_amount > balance:
-                    bot.answer_callback_query(call.id, "❌ Недостаточно средств!")
+                    await call.answer("❌ Недостаточно средств!")
                     return
 
                 with bet_lock:
                     if user_id not in active_bets:
-                        bot.answer_callback_query(call.id, "❌ Сначала выберите игру!", show_alert=True)
+                        await call.answer("❌ Сначала выберите игру!", show_alert=True)
                         return
 
                     active_bets[user_id]['bet_amount'] = bet_amount
@@ -1895,50 +1877,42 @@ def register_games_handlers(bot_instance):
                     game_session_tokens[user_id] = session_token
 
                 if game_type == "dice":
-                    bot.edit_message_text(
+                    await call.message.edit_text(
                         f"""<b>🎲 Кости</b>
 
 <blockquote>💵 Сумма ставки: {bet_amount}₽</blockquote>
 
 Выберите исход:""",
-                        call.message.chat.id,
-                        call.message.message_id,
                         parse_mode='HTML',
                         reply_markup=get_dice_selection_keyboard()
                     )
                 elif game_type == "basketball":
-                    bot.edit_message_text(
+                    await call.message.edit_text(
                         f"""<b>🏀 Баскетбол</b>
 
 <blockquote>💵 Сумма ставки: {bet_amount}₽</blockquote>
 
 Выберите исход:""",
-                        call.message.chat.id,
-                        call.message.message_id,
                         parse_mode='HTML',
                         reply_markup=get_basketball_selection_keyboard()
                     )
                 elif game_type == "football":
-                    bot.edit_message_text(
+                    await call.message.edit_text(
                         f"""<b>⚽ Футбол</b>
 
 <blockquote>💵 Сумма ставки: {bet_amount}₽</blockquote>
 
 Выберите исход:""",
-                        call.message.chat.id,
-                        call.message.message_id,
                         parse_mode='HTML',
                         reply_markup=get_football_selection_keyboard()
                     )
                 elif game_type == "darts":
-                    bot.edit_message_text(
+                    await call.message.edit_text(
                         f"""<b>🎯 Дартс</b>
 
 <blockquote>💵 Сумма ставки: {bet_amount}₽</blockquote>
 
 Выберите исход:""",
-                        call.message.chat.id,
-                        call.message.message_id,
                         parse_mode='HTML',
                         reply_markup=get_darts_selection_keyboard()
                     )
@@ -1947,40 +1921,41 @@ def register_games_handlers(bot_instance):
             elif call.data == "games_custom_bet":
                 with bet_lock:
                     if user_id not in active_bets:
-                        bot.answer_callback_query(call.id, "❌ Сначала выберите игру!", show_alert=True)
+                        await call.answer("❌ Сначала выберите игру!", show_alert=True)
                         return
 
-                bot.send_message(call.message.chat.id,
-                               """<b>📝 Ввод суммы</b>
+                await call.message.answer(
+                    """<b>📝 Ввод суммы</b>
 
 <blockquote>Введите сумму ставки:</blockquote>""",
-                               parse_mode='HTML')
-                bot.register_next_step_handler(call.message, process_custom_bet_games)
+                    parse_mode='HTML'
+                )
+                await state.set_state(GamesStates.waiting_for_custom_bet)
                 return
 
         except Exception as e:
             logging.error(f"Ошибка в games_callback_handler: {e}")
             try:
-                bot.answer_callback_query(call.id, "❌ Произошла ошибка!")
+                await call.answer("❌ Произошла ошибка!")
             except:
                 pass
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith(('dice_', 'basketball_', 'football_', 'darts_')))
-    def games_mode_callback_handler(call):
+    @dp.callback_query(F.data.startswith(('dice_', 'basketball_', 'football_', 'darts_')))
+    async def games_mode_callback_handler(call: CallbackQuery):
         try:
             user_id = str(call.from_user.id)
 
             if not rate_limit(user_id):
-                bot.answer_callback_query(call.id, "❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
+                await call.answer("❌ Слишком быстро! Подождите 0.4 секунды.", show_alert=True)
                 return
 
             with bet_lock:
                 if user_id not in active_bets or 'bet_amount' not in active_bets[user_id]:
-                    bot.answer_callback_query(call.id, "❌ Сначала сделайте ставку!")
+                    await call.answer("❌ Сначала сделайте ставку!")
                     return
 
                 if user_id in active_games:
-                    bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                    await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                     return
 
                 bet_amount = active_bets[user_id]['bet_amount']
@@ -1989,43 +1964,39 @@ def register_games_handlers(bot_instance):
 
             if call.data.startswith("dice_"):
                 bet_type = call.data.split("_")[1]
-                threading.Thread(
-                    target=play_dice_game,
-                    args=(bot, call, bet_type, bet_amount, user_id, session_token),
-                    daemon=True
-                ).start()
+                asyncio.create_task(
+                    play_dice_game(call.message.bot, call, bet_type, bet_amount, user_id, session_token)
+                )
 
             elif call.data.startswith("basketball_"):
                 bet_type = call.data.split("_")[1]
-                threading.Thread(
-                    target=play_basketball_game,
-                    args=(bot, call, bet_type, bet_amount, user_id, session_token),
-                    daemon=True
-                ).start()
+                asyncio.create_task(
+                    play_basketball_game(call.message.bot, call, bet_type, bet_amount, user_id, session_token)
+                )
 
             elif call.data.startswith("football_"):
                 bet_type = call.data.split("_")[1]
-                threading.Thread(
-                    target=play_football_game,
-                    args=(bot, call, bet_type, bet_amount, user_id, session_token),
-                    daemon=True
-                ).start()
+                asyncio.create_task(
+                    play_football_game(call.message.bot, call, bet_type, bet_amount, user_id, session_token)
+                )
 
             elif call.data.startswith("darts_"):
                 bet_type = call.data.split("_")[1]
-                threading.Thread(
-                    target=play_darts_game,
-                    args=(bot, call, bet_type, bet_amount, user_id, session_token),
-                    daemon=True
-                ).start()
+                asyncio.create_task(
+                    play_darts_game(call.message.bot, call, bet_type, bet_amount, user_id, session_token)
+                )
 
-            bot.answer_callback_query(call.id, "🎮 Запускаем игру...")
+            await call.answer("🎮 Запускаем игру...")
 
         except Exception as e:
             logging.error(f"Ошибка в games_mode_callback_handler: {e}")
             try:
-                bot.answer_callback_query(call.id, "❌ Ошибка запуска игры")
+                await call.answer("❌ Ошибка запуска игры")
             except:
                 pass
 
+    @dp.message(GamesStates.waiting_for_custom_bet)
+    async def handle_custom_bet(message: Message, state: FSMContext):
+        await process_custom_bet_games(message, state)
 
+    print("✅ Games handlers registered")
