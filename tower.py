@@ -1,11 +1,15 @@
-import telebot
-from telebot import types
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 import random
 import json
 import time
 import threading
 import logging
 import hashlib
+import asyncio
 
 import referrals
 
@@ -121,7 +125,14 @@ MAX_BET = float('inf')
 
 GAME_TIMEOUT = 300
 
-def cleanup_inactive_tower_games():
+bot: Bot = None
+dp: Dispatcher = None
+
+class TowerStates(StatesGroup):
+    waiting_for_custom_bet = State()
+    waiting_for_custom_mines = State()
+
+async def cleanup_inactive_tower_games():
     """Очистка неактивных игр и возврат ставок"""
     current_time = time.time()
     games_to_remove = []
@@ -140,7 +151,7 @@ def cleanup_inactive_tower_games():
                 save_users_data(users_data)
                 logging.info(f"Возвращена ставка {game.bet_amount} пользователю {user_id} за неактивную игру Башня")
             
-            if game.chat_id and game.message_id:
+            if game.chat_id and game.message_id and bot:
                 try:
                     timeout_message = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -159,13 +170,12 @@ def cleanup_inactive_tower_games():
 
 <i>Ваша ставка возвращена на баланс! ✅</i>
 """
-                    bot.edit_message_text(
+                    await bot.edit_message_text(
                         timeout_message,
                         game.chat_id,
                         game.message_id,
                         parse_mode='HTML'
                     )
-                    time.sleep(2)
                 except Exception as e:
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения игры Башня {user_id}: {e}")
@@ -195,7 +205,7 @@ def start_cleanup_tower_thread():
     def cleanup_worker():
         while True:
             try:
-                cleanup_inactive_tower_games()
+                asyncio.run(cleanup_inactive_tower_games())
                 time.sleep(60)
             except Exception as e:
                 logging.error(f"Ошибка в cleanup_worker (Башня): {e}")
@@ -241,23 +251,27 @@ def clear_action_processing_tower(user_id, action_key=""):
 
 def get_bet_selection_keyboard_tower():
     """Клавиатура выбора ставки для башни"""
-    markup = types.InlineKeyboardMarkup(row_width=5)
     bets = ["25", "50", "125", "250", "500"]
-    buttons = [types.InlineKeyboardButton(f"{bet_value}₽", callback_data=f"tower_bet_{bet_value}") for bet_value in bets]
-    markup.row(*buttons)
-    markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="tower_custom_bet"))
+    buttons = [InlineKeyboardButton(text=f"{bet_value}₽", callback_data=f"tower_bet_{bet_value}") for bet_value in bets]
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        buttons,
+        [InlineKeyboardButton(text="📝 Ввести вручную", callback_data="tower_custom_bet")]
+    ])
     return markup
 
 def get_mines_selection_keyboard_tower():
-    markup = types.InlineKeyboardMarkup(row_width=4)
     mines_counts = ["1", "2", "3", "4"]
-    buttons = [types.InlineKeyboardButton(f"{count}", callback_data=f"tower_mines_{count}") for count in mines_counts]
-    markup.row(*buttons)
-    markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="tower_custom_mines"))
+    buttons = [InlineKeyboardButton(text=f"{count}", callback_data=f"tower_mines_{count}") for count in mines_counts]
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        buttons,
+        [InlineKeyboardButton(text="📝 Ввести вручную", callback_data="tower_custom_mines")]
+    ])
     return markup
 
 def get_tower_keyboard(game, show_all=False, show_current_mines=False):
-    markup = types.InlineKeyboardMarkup(row_width=6)
+    buttons = []
 
     for floor_num in range(6, 0, -1):
         row_buttons = []
@@ -271,7 +285,7 @@ def get_tower_keyboard(game, show_all=False, show_current_mines=False):
         else:
             mult_text = f"x{multiplier:.0f}"
 
-        mult_button = types.InlineKeyboardButton(f"{mult_text}", callback_data="tower_ignore")
+        mult_button = InlineKeyboardButton(text=f"{mult_text}", callback_data="tower_ignore")
         row_buttons.append(mult_button)
 
         for cell in range(5):
@@ -309,18 +323,18 @@ def get_tower_keyboard(game, show_all=False, show_current_mines=False):
                     emoji = "◾"
                     callback_data = "tower_ignore"
 
-            row_buttons.append(types.InlineKeyboardButton(emoji, callback_data=callback_data))
+            row_buttons.append(InlineKeyboardButton(text=emoji, callback_data=callback_data))
 
-        markup.row(*row_buttons)
+        buttons.append(row_buttons)
 
     if (not show_all and game.floor > 0 and game.game_active) or show_current_mines:
         current_mult = game.get_current_multiplier()
-        markup.row(types.InlineKeyboardButton(
-            f"💰 ЗАБРАТЬ {round(game.bet_amount * current_mult, 2)}₽",
+        buttons.append([InlineKeyboardButton(
+            text=f"💰 ЗАБРАТЬ {round(game.bet_amount * current_mult, 2)}₽",
             callback_data="tower_cashout"
-        ))
+        )])
 
-    return markup
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def format_tower_info(game):
     """Форматирует информацию об игре в красивый вид"""
@@ -403,9 +417,7 @@ def format_tower_result(game, win_amount, is_win=False):
 <i>Попали на мину! Попробуйте еще раз! 💪</i>
 """
 
-bot = None
-
-def cancel_tower_user_game(user_id, notify_user=True):
+async def cancel_tower_user_game(user_id: str, notify_user: bool = True):
     """Принудительно отменяет игру пользователя и возвращает ставку"""
     try:
         with tower_lock:
@@ -420,7 +432,7 @@ def cancel_tower_user_game(user_id, notify_user=True):
                 save_users_data(users_data)
                 logging.info(f"Принудительно возвращена ставка {game.bet_amount} пользователю {user_id} за игру Башня")
             
-            if notify_user and game.chat_id and game.message_id:
+            if notify_user and game.chat_id and game.message_id and bot:
                 try:
                     cancel_message = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -438,7 +450,7 @@ def cancel_tower_user_game(user_id, notify_user=True):
 
 <i>Ваша ставка возвращена на баланс! ✅</i>
 """
-                    bot.edit_message_text(
+                    await bot.edit_message_text(
                         cancel_message,
                         game.chat_id,
                         game.message_id,
@@ -448,7 +460,7 @@ def cancel_tower_user_game(user_id, notify_user=True):
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения отмены Башня {user_id}: {e}")
                         try:
-                            bot.send_message(game.chat_id, cancel_message, parse_mode='HTML')
+                            await bot.send_message(game.chat_id, cancel_message, parse_mode='HTML')
                         except:
                             pass
             
@@ -471,12 +483,12 @@ def cancel_tower_user_game(user_id, notify_user=True):
         logging.error(f"Ошибка при отмене игры Башня пользователя {user_id}: {e}")
         return False
 
-def start_tower_game_from_command(user_id, mines_count, bet_amount, message=None, chat_id=None, message_id=None):
+async def start_tower_game_from_command(user_id: str, mines_count: int, bet_amount: float, message: Message = None, chat_id: int = None, message_id: int = None):
     """Функция для запуска игры через команду"""
     try:
         if not rate_limit_tower(user_id):
             if message:
-                bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
+                await message.answer("❌ Слишком быстро! Подождите 0.4 секунды.")
             return False
 
         with tower_lock:
@@ -484,20 +496,20 @@ def start_tower_game_from_command(user_id, mines_count, bet_amount, message=None
                 game = active_tower_games[user_id]
                 current_time = time.time()
                 if current_time - game.created_time > GAME_TIMEOUT:
-                    cancel_tower_user_game(user_id)
+                    await cancel_tower_user_game(user_id)
                 else:
                     if message:
-                        bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
+                        await message.answer("❌ У вас уже есть активная игра!")
                     return False
 
         if mines_count < 1 or mines_count > 4:
             if message:
-                bot.send_message(message.chat.id, "❌ Количество мин должно быть от 1 до 4!")
+                await message.answer("❌ Количество мин должно быть от 1 до 4!")
             return False
 
         if bet_amount < MIN_BET:
             if message:
-                bot.send_message(message.chat.id, f"❌ Минимальная ставка: {MIN_BET}₽")
+                await message.answer(f"❌ Минимальная ставка: {MIN_BET}₽")
             return False
 
         users_data = load_users_data()
@@ -509,7 +521,7 @@ def start_tower_game_from_command(user_id, mines_count, bet_amount, message=None
         balance = users_data[user_id].get('balance', 0)
         if bet_amount > balance:
             if message:
-                bot.send_message(message.chat.id, "❌ Недостаточно средств!")
+                await message.answer("❌ Недостаточно средств!")
             return False
 
         if message:
@@ -526,16 +538,15 @@ def start_tower_game_from_command(user_id, mines_count, bet_amount, message=None
         save_users_data(users_data)
 
         if message:
-            sent_message = bot.send_message(
-                message.chat.id,
+            sent_message = await message.answer(
                 format_tower_info(game),
                 parse_mode='HTML',
                 reply_markup=get_tower_keyboard(game)
             )
             game.message_id = sent_message.message_id
-        elif chat_id and message_id:
+        elif chat_id and message_id and bot:
             try:
-                bot.edit_message_text(
+                await bot.edit_message_text(
                     format_tower_info(game),
                     chat_id,
                     message_id,
@@ -546,15 +557,15 @@ def start_tower_game_from_command(user_id, mines_count, bet_amount, message=None
             except Exception as e:
                 if "message is not modified" not in str(e):
                     logging.error(f"Ошибка edit_message_text при запуске игры Башня: {e}")
-                    sent_message = bot.send_message(
+                    sent_message = await bot.send_message(
                         chat_id,
                         format_tower_info(game),
                         parse_mode='HTML',
                         reply_markup=get_tower_keyboard(game)
                     )
                     game.message_id = sent_message.message_id
-        elif chat_id:
-            sent_message = bot.send_message(
+        elif chat_id and bot:
+            sent_message = await bot.send_message(
                 chat_id,
                 format_tower_info(game),
                 parse_mode='HTML',
@@ -566,7 +577,7 @@ def start_tower_game_from_command(user_id, mines_count, bet_amount, message=None
     except Exception as e:
         logging.error(f"Ошибка в start_tower_game_from_command: {e}")
         if message:
-            bot.send_message(message.chat.id, "❌ Произошла ошибка при запуске игры!")
+            await message.answer("❌ Произошла ошибка при запуске игры!")
         return False
 
 def parse_tower_command(text):
@@ -609,18 +620,15 @@ def parse_tower_command(text):
         logging.error(f"Ошибка при парсинге команды: {e}")
         return None, None
 
-def register_tower_handlers(bot_instance):
-    global bot
+def register_tower_handlers(dp_instance: Dispatcher, bot_instance: Bot):
+    global dp, bot
+    dp = dp_instance
     bot = bot_instance
     
     start_cleanup_tower_thread()
 
-    @bot.message_handler(func=lambda message: message.text and 
-                        any(message.text.lower().startswith(cmd + ' ') or 
-                            message.text.lower() == cmd for cmd in 
-                            ['/башня', '/tower', 'башня', 'tower', 
-                             '/лесенка', 'лесенка', '/лестница', 'лестница']))
-    def tower_command_handler(message):
+    @dp.message(F.text.regexp(r'^(/башня|/tower|башня|tower|/лесенка|лесенка|/лестница|лестница)\s+\d+\s+\d+'))
+    async def tower_command_handler(message: Message):
         user_id = str(message.from_user.id)
         
         mines_count, bet_amount = parse_tower_command(message.text)
@@ -648,126 +656,17 @@ def register_tower_handlers(bot_instance):
 • Минимальная ставка: 10₽
 • Игра автоматически закрывается через 5 минут бездействия (ставка возвращается)
 </blockquote>"""
-            bot.send_message(message.chat.id, help_text, parse_mode='HTML')
+            await message.answer(help_text, parse_mode='HTML')
             return
         
-        start_tower_game_from_command(user_id, mines_count, bet_amount, message=message)
+        await start_tower_game_from_command(user_id, mines_count, bet_amount, message=message)
 
-    def process_custom_bet(message):
-        try:
-            user_id = str(message.from_user.id)
-
-            if not rate_limit_tower(user_id):
-                bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
-                return
-
-            with tower_lock:
-                if user_id in active_tower_games:
-                    game = active_tower_games[user_id]
-                    current_time = time.time()
-                    if current_time - game.created_time > GAME_TIMEOUT:
-                        cancel_tower_user_game(user_id)
-                    else:
-                        bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
-                        return
-
-            bet_amount = float(message.text)
-
-            if bet_amount < MIN_BET:
-                bot.send_message(message.chat.id, f"❌ Минимальная ставка: {MIN_BET}₽")
-                return
-
-            if bet_amount > MAX_BET:
-                bot.send_message(message.chat.id, f"❌ Максимальная ставка: {MAX_BET}₽")
-                return
-
-            users_data = load_users_data()
-
-            if user_id not in users_data:
-                users_data[user_id] = {'balance': 0}
-
-            balance = users_data[user_id].get('balance', 0)
-            if bet_amount > balance:
-                bot.send_message(message.chat.id, "❌ Недостаточно средств!")
-                return
-
-            with tower_lock:
-                user_temp_data_tower[user_id] = {'bet_amount': bet_amount}
-
-            bot.send_message(
-                message.chat.id,
-                """<blockquote expandable>╔══════════════════════╗
-   🏰 <b>ИГРА БАШНЯ</b> 🏰
-╚══════════════════════╝</blockquote>
-
-<blockquote>
-Выберите количество мин (1-4):
-</blockquote>""",
-                parse_mode='HTML',
-                reply_markup=get_mines_selection_keyboard_tower()
-            )
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите корректную сумму!")
-        except Exception as e:
-            logging.error(f"Ошибка в process_custom_bet: {e}")
-            bot.send_message(message.chat.id, "❌ Произошла ошибка!")
-
-    def process_custom_mines_tower(message):
-        try:
-            user_id = str(message.from_user.id)
-
-            mines_count = int(message.text)
-            if not 1 <= mines_count <= 4:
-                bot.send_message(message.chat.id, "❌ Введите число от 1 до 4!")
-                return
-
-            users_data = load_users_data()
-
-            with tower_lock:
-                if user_id in active_tower_games:
-                    game = active_tower_games[user_id]
-                    current_time = time.time()
-                    if current_time - game.created_time > GAME_TIMEOUT:
-                        cancel_tower_user_game(user_id)
-                    else:
-                        bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
-                        return
-
-                if user_id not in user_temp_data_tower or 'bet_amount' not in user_temp_data_tower[user_id]:
-                    bot.send_message(message.chat.id, "❌ Ошибка данных! Начните заново.")
-                    return
-
-                bet_amount = user_temp_data_tower[user_id]['bet_amount']
-
-            balance = users_data[user_id].get('balance', 0)
-            if bet_amount > balance:
-                bot.send_message(message.chat.id, "❌ Недостаточно средств!")
-                return
-
-            success = start_tower_game_from_command(
-                user_id=user_id,
-                mines_count=mines_count,
-                bet_amount=bet_amount,
-                message=message
-            )
-
-            if success:
-                with tower_lock:
-                    if user_id in user_temp_data_tower:
-                        del user_temp_data_tower[user_id]
-
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите корректное число!")
-        except Exception as e:
-            logging.error(f"Ошибка в process_custom_mines_tower: {e}")
-            bot.send_message(message.chat.id, "❌ Произошла ошибка!")
-
-    @bot.message_handler(func=lambda message: message.text in ["🏰 Башня", "башня", "Tower", "tower", "Лесенка", "лесенка", "Лестница", "лестница", "Ленсенька", "лесенька"])
-    def tower_start_internal(message):
+    @dp.message(F.text.in_(["🏰 Башня", "башня", "Tower", "tower", "Лесенка", "лесенка", "Лестница", "лестница", "Ленсенька", "лесенька"]))
+    async def tower_start_internal(message: Message):
         user_id = str(message.from_user.id)
 
         if not rate_limit_tower(user_id):
-            bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
+            await message.answer("❌ Слишком быстро! Подождите 0.4 секунды.")
             return
 
         with tower_lock:
@@ -775,9 +674,9 @@ def register_tower_handlers(bot_instance):
                 game = active_tower_games[user_id]
                 current_time = time.time()
                 if current_time - game.created_time > GAME_TIMEOUT:
-                    cancel_tower_user_game(user_id)
+                    await cancel_tower_user_game(user_id)
                 else:
-                    bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
+                    await message.answer("❌ У вас уже есть активная игра!")
                     return
 
         users_data = load_users_data()
@@ -789,8 +688,7 @@ def register_tower_handlers(bot_instance):
         balance = users_data[user_id].get('balance', 0)
         balance_rounded = round(balance, 2)
 
-        bot.send_message(
-            message.chat.id,
+        await message.answer(
             f"""<blockquote expandable>╔══════════════════════╗
    🏰 <b>ИГРА БАШНЯ</b> 🏰
 ╚══════════════════════╝</blockquote>
@@ -804,8 +702,132 @@ def register_tower_handlers(bot_instance):
             reply_markup=get_bet_selection_keyboard_tower()
         )
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('tower_'))
-    def tower_callback_handler(call):
+    async def process_custom_bet(message: Message, state: FSMContext):
+        try:
+            user_id = str(message.from_user.id)
+
+            if not rate_limit_tower(user_id):
+                await message.answer("❌ Слишком быстро! Подождите 0.4 секунды.")
+                await state.clear()
+                return
+
+            with tower_lock:
+                if user_id in active_tower_games:
+                    game = active_tower_games[user_id]
+                    current_time = time.time()
+                    if current_time - game.created_time > GAME_TIMEOUT:
+                        await cancel_tower_user_game(user_id)
+                    else:
+                        await message.answer("❌ У вас уже есть активная игра!")
+                        await state.clear()
+                        return
+
+            bet_amount = float(message.text)
+
+            if bet_amount < MIN_BET:
+                await message.answer(f"❌ Минимальная ставка: {MIN_BET}₽")
+                await state.clear()
+                return
+
+            if bet_amount > MAX_BET:
+                await message.answer(f"❌ Максимальная ставка: {MAX_BET}₽")
+                await state.clear()
+                return
+
+            users_data = load_users_data()
+
+            if user_id not in users_data:
+                users_data[user_id] = {'balance': 0}
+
+            balance = users_data[user_id].get('balance', 0)
+            if bet_amount > balance:
+                await message.answer("❌ Недостаточно средств!")
+                await state.clear()
+                return
+
+            with tower_lock:
+                user_temp_data_tower[user_id] = {'bet_amount': bet_amount}
+
+            await message.answer(
+                """<blockquote expandable>╔══════════════════════╗
+   🏰 <b>ИГРА БАШНЯ</b> 🏰
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+Выберите количество мин (1-4):
+</blockquote>""",
+                parse_mode='HTML',
+                reply_markup=get_mines_selection_keyboard_tower()
+            )
+            await state.clear()
+        except ValueError:
+            await message.answer("❌ Введите корректную сумму!")
+            await state.clear()
+        except Exception as e:
+            logging.error(f"Ошибка в process_custom_bet: {e}")
+            await message.answer("❌ Произошла ошибка!")
+            await state.clear()
+
+    async def process_custom_mines_tower(message: Message, state: FSMContext):
+        try:
+            user_id = str(message.from_user.id)
+
+            mines_count = int(message.text)
+            if not 1 <= mines_count <= 4:
+                await message.answer("❌ Введите число от 1 до 4!")
+                await state.clear()
+                return
+
+            users_data = load_users_data()
+
+            with tower_lock:
+                if user_id in active_tower_games:
+                    game = active_tower_games[user_id]
+                    current_time = time.time()
+                    if current_time - game.created_time > GAME_TIMEOUT:
+                        await cancel_tower_user_game(user_id)
+                    else:
+                        await message.answer("❌ У вас уже есть активная игра!")
+                        await state.clear()
+                        return
+
+                if user_id not in user_temp_data_tower or 'bet_amount' not in user_temp_data_tower[user_id]:
+                    await message.answer("❌ Ошибка данных! Начните заново.")
+                    await state.clear()
+                    return
+
+                bet_amount = user_temp_data_tower[user_id]['bet_amount']
+
+            balance = users_data[user_id].get('balance', 0)
+            if bet_amount > balance:
+                await message.answer("❌ Недостаточно средств!")
+                await state.clear()
+                return
+
+            success = await start_tower_game_from_command(
+                user_id=user_id,
+                mines_count=mines_count,
+                bet_amount=bet_amount,
+                message=message
+            )
+
+            if success:
+                with tower_lock:
+                    if user_id in user_temp_data_tower:
+                        del user_temp_data_tower[user_id]
+
+            await state.clear()
+
+        except ValueError:
+            await message.answer("❌ Введите корректное число!")
+            await state.clear()
+        except Exception as e:
+            logging.error(f"Ошибка в process_custom_mines_tower: {e}")
+            await message.answer("❌ Произошла ошибка!")
+            await state.clear()
+
+    @dp.callback_query(F.data.startswith('tower_'))
+    async def tower_callback_handler(call: CallbackQuery, state: FSMContext):
         try:
             user_id = str(call.from_user.id)
 
@@ -822,13 +844,13 @@ def register_tower_handlers(bot_instance):
                 action_key = f"bet_{bet}"
             elif call.data.startswith("tower_mines_"):
                 count = call.data.split("_")[2]
-                action_key = f"dragons_{count}"
+                action_key = f"mines_{count}"
             else:
                 action_key = call.data
 
             if is_action_processing_tower(user_id, action_key):
                 try:
-                    bot.answer_callback_query(call.id, "⏳ Действие уже обрабатывается...", show_alert=False)
+                    await call.answer("⏳ Действие уже обрабатывается...", show_alert=False)
                 except:
                     pass
                 return
@@ -843,10 +865,10 @@ def register_tower_handlers(bot_instance):
                         game = active_tower_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            cancel_tower_user_game(user_id)
+                            await cancel_tower_user_game(user_id)
                         else:
                             try:
-                                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                                await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                             except:
                                 pass
                             clear_action_processing_tower(user_id, action_key)
@@ -857,7 +879,7 @@ def register_tower_handlers(bot_instance):
                 balance = users_data[user_id].get('balance', 0)
                 if bet_amount > balance:
                     try:
-                        bot.answer_callback_query(call.id, "❌ Недостаточно средств!")
+                        await call.answer("❌ Недостаточно средств!")
                     except:
                         pass
                     clear_action_processing_tower(user_id, action_key)
@@ -867,7 +889,7 @@ def register_tower_handlers(bot_instance):
                     user_temp_data_tower[user_id] = {'bet_amount': bet_amount}
 
                 try:
-                    bot.edit_message_text(
+                    await call.message.edit_text(
                         """<blockquote expandable>╔══════════════════════╗
    🏰 <b>ИГРА БАШНЯ</b> 🏰
 ╚══════════════════════╝</blockquote>
@@ -875,8 +897,6 @@ def register_tower_handlers(bot_instance):
 <blockquote>
 Выберите количество мин (1-4):
 </blockquote>""",
-                        call.message.chat.id,
-                        call.message.message_id,
                         parse_mode='HTML',
                         reply_markup=get_mines_selection_keyboard_tower()
                     )
@@ -895,10 +915,10 @@ def register_tower_handlers(bot_instance):
                         game = active_tower_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            cancel_tower_user_game(user_id)
+                            await cancel_tower_user_game(user_id)
                         else:
                             try:
-                                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                                await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                             except:
                                 pass
                             clear_action_processing_tower(user_id, action_key)
@@ -906,7 +926,7 @@ def register_tower_handlers(bot_instance):
 
                     if user_id not in user_temp_data_tower or 'bet_amount' not in user_temp_data_tower[user_id]:
                         try:
-                            bot.answer_callback_query(call.id, "❌ Ошибка данных!")
+                            await call.answer("❌ Ошибка данных!")
                         except:
                             pass
                         clear_action_processing_tower(user_id, action_key)
@@ -917,13 +937,13 @@ def register_tower_handlers(bot_instance):
                 balance = users_data[user_id].get('balance', 0)
                 if bet_amount > balance:
                     try:
-                        bot.answer_callback_query(call.id, "❌ Недостаточно средств!")
+                        await call.answer("❌ Недостаточно средств!")
                     except:
                         pass
                     clear_action_processing_tower(user_id, action_key)
                     return
 
-                success = start_tower_game_from_command(
+                success = await start_tower_game_from_command(
                     user_id=user_id,
                     mines_count=mines_count,
                     bet_amount=bet_amount,
@@ -945,18 +965,17 @@ def register_tower_handlers(bot_instance):
                         game = active_tower_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            cancel_tower_user_game(user_id)
+                            await cancel_tower_user_game(user_id)
                         else:
                             try:
-                                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                                await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                             except:
                                 pass
                             clear_action_processing_tower(user_id, action_key)
                             return
 
                 try:
-                    bot.send_message(
-                        call.message.chat.id,
+                    await call.message.answer(
                         """<blockquote expandable>╔══════════════════════╗
    📝 <b>ВВОД СТАВКИ</b> 📝
 ╚══════════════════════╝</blockquote>
@@ -966,15 +985,9 @@ def register_tower_handlers(bot_instance):
 </blockquote>""",
                         parse_mode='HTML'
                     )
+                    await state.set_state(TowerStates.waiting_for_custom_bet)
                 except Exception as e:
                     logging.error(f"Ошибка отправки сообщения tower_custom_bet: {e}")
-                    clear_action_processing_tower(user_id, action_key)
-                    return
-                
-                try:
-                    bot.register_next_step_handler(call.message, process_custom_bet)
-                except Exception as e:
-                    logging.error(f"Ошибка register_next_step_handler: {e}")
                 finally:
                     clear_action_processing_tower(user_id, action_key)
                 return
@@ -985,20 +998,19 @@ def register_tower_handlers(bot_instance):
                         game = active_tower_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            cancel_tower_user_game(user_id)
+                            await cancel_tower_user_game(user_id)
                         else:
                             try:
-                                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                                await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                             except:
                                 pass
                             clear_action_processing_tower(user_id, action_key)
                             return
 
                 try:
-                    bot.send_message(
-                        call.message.chat.id,
+                    await call.message.answer(
                         """<blockquote expandable>╔══════════════════════╗
-   📝 <b>ВВОД КОЛИЧЕСТВА ДРАКОНОВ</b> 📝
+   📝 <b>ВВОД КОЛИЧЕСТВА МИН</b> 📝
 ╚══════════════════════╝</blockquote>
 
 <blockquote>
@@ -1006,15 +1018,9 @@ def register_tower_handlers(bot_instance):
 </blockquote>""",
                         parse_mode='HTML'
                     )
+                    await state.set_state(TowerStates.waiting_for_custom_mines)
                 except Exception as e:
                     logging.error(f"Ошибка отправки сообщения tower_custom_mines: {e}")
-                    clear_action_processing_tower(user_id, action_key)
-                    return
-                
-                try:
-                    bot.register_next_step_handler(call.message, process_custom_mines_tower)
-                except Exception as e:
-                    logging.error(f"Ошибка register_next_step_handler: {e}")
                 finally:
                     clear_action_processing_tower(user_id, action_key)
                 return
@@ -1023,7 +1029,7 @@ def register_tower_handlers(bot_instance):
                 with tower_lock:
                     if user_id not in active_tower_games:
                         try:
-                            bot.answer_callback_query(call.id, "❌ Игра не найдена")
+                            await call.answer("❌ Игра не найдена")
                         except:
                             pass
                         clear_action_processing_tower(user_id, action_key)
@@ -1033,7 +1039,7 @@ def register_tower_handlers(bot_instance):
 
                 if not game.game_active:
                     try:
-                        bot.answer_callback_query(call.id, "❌ Игра уже завершена!")
+                        await call.answer("❌ Игра уже завершена!")
                     except:
                         pass
                     clear_action_processing_tower(user_id, action_key)
@@ -1047,7 +1053,7 @@ def register_tower_handlers(bot_instance):
                     current_time = time.time()
                     if current_time - game.last_action_time < 0.4:
                         try:
-                            bot.answer_callback_query(call.id, "⏳ Подождите немного...", show_alert=False)
+                            await call.answer("⏳ Подождите немного...", show_alert=False)
                         except:
                             pass
                         clear_action_processing_tower(user_id, action_key)
@@ -1079,10 +1085,8 @@ def register_tower_handlers(bot_instance):
                                 del active_tower_games[user_id]
 
                         try:
-                            bot.edit_message_text(
+                            await call.message.edit_text(
                                 format_tower_result(game, 0, False),
-                                call.message.chat.id,
-                                call.message.message_id,
                                 parse_mode='HTML',
                                 reply_markup=get_tower_keyboard(game, show_all=True)
                             )
@@ -1094,10 +1098,8 @@ def register_tower_handlers(bot_instance):
                         return
                     else:
                         try:
-                            bot.edit_message_text(
+                            await call.message.edit_text(
                                 format_tower_info(game),
-                                call.message.chat.id,
-                                call.message.message_id,
                                 parse_mode='HTML',
                                 reply_markup=get_tower_keyboard(game, show_current_mines=True)
                             )
@@ -1112,7 +1114,7 @@ def register_tower_handlers(bot_instance):
                 with tower_lock:
                     if user_id not in active_tower_games:
                         try:
-                            bot.answer_callback_query(call.id, "❌ Игра не найдена")
+                            await call.answer("❌ Игра не найдена")
                         except:
                             pass
                         clear_action_processing_tower(user_id, action_key)
@@ -1122,7 +1124,7 @@ def register_tower_handlers(bot_instance):
 
                 if not game.game_active:
                     try:
-                        bot.answer_callback_query(call.id, "❌ Игра уже завершена!")
+                        await call.answer("❌ Игра уже завершена!")
                     except:
                         pass
                     clear_action_processing_tower(user_id, action_key)
@@ -1132,7 +1134,7 @@ def register_tower_handlers(bot_instance):
                     current_time = time.time()
                     if current_time - game.last_action_time < 0.4:
                         try:
-                            bot.answer_callback_query(call.id, "⏳ Подождите немного...", show_alert=False)
+                            await call.answer("⏳ Подождите немного...", show_alert=False)
                         except:
                             pass
                         clear_action_processing_tower(user_id, action_key)
@@ -1167,10 +1169,8 @@ def register_tower_handlers(bot_instance):
                             del active_tower_games[user_id]
 
                     try:
-                        bot.edit_message_text(
+                        await call.message.edit_text(
                             format_tower_result(game, win_amount, True),
-                            call.message.chat.id,
-                            call.message.message_id,
                             parse_mode='HTML',
                             reply_markup=get_tower_keyboard(game, show_all=True)
                         )
@@ -1183,7 +1183,7 @@ def register_tower_handlers(bot_instance):
 
             elif call.data == "tower_ignore":
                 try:
-                    bot.answer_callback_query(call.id)
+                    await call.answer()
                 except:
                     pass
                 finally:
@@ -1198,17 +1198,27 @@ def register_tower_handlers(bot_instance):
             else:
                 logging.error(f"Ошибка в tower_callback_handler: {e}")
                 try:
-                    bot.answer_callback_query(call.id, "❌ Произошла ошибка!")
+                    await call.answer("❌ Произошла ошибка!")
                 except:
                     pass
             clear_action_processing_tower(user_id, action_key if 'action_key' in locals() else "")
 
-def tower_start(message):
+    @dp.message(TowerStates.waiting_for_custom_bet)
+    async def handle_custom_bet(message: Message, state: FSMContext):
+        await process_custom_bet(message, state)
+
+    @dp.message(TowerStates.waiting_for_custom_mines)
+    async def handle_custom_mines(message: Message, state: FSMContext):
+        await process_custom_mines_tower(message, state)
+
+    print("✅ Tower handlers registered")
+
+async def tower_start(message: Message):
     """Функция для запуска игры Башня из внешних модулей"""
     user_id = str(message.from_user.id)
 
     if not rate_limit_tower(user_id):
-        bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.4 секунды.")
+        await message.answer("❌ Слишком быстро! Подождите 0.4 секунды.")
         return
 
     with tower_lock:
@@ -1216,9 +1226,9 @@ def tower_start(message):
             game = active_tower_games[user_id]
             current_time = time.time()
             if current_time - game.created_time > GAME_TIMEOUT:
-                cancel_tower_user_game(user_id)
+                await cancel_tower_user_game(user_id)
             else:
-                bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
+                await message.answer("❌ У вас уже есть активная игра!")
                 return
 
     users_data = load_users_data()
@@ -1230,8 +1240,7 @@ def tower_start(message):
     balance = users_data[user_id].get('balance', 0)
     balance_rounded = round(balance, 2)
 
-    bot.send_message(
-        message.chat.id,
+    await message.answer(
         f"""<blockquote expandable>╔══════════════════════╗
    🏰 <b>ИГРА БАШНЯ</b> 🏰
 ╚══════════════════════╝</blockquote>
@@ -1245,9 +1254,9 @@ def tower_start(message):
         reply_markup=get_bet_selection_keyboard_tower()
     )
 
-def cancel_tower_game(user_id):
+async def cancel_tower_game(user_id: str):
     """Внешняя функция для отмены игры пользователя"""
-    return cancel_tower_user_game(str(user_id))
+    return await cancel_tower_user_game(str(user_id))
 
 def get_active_tower_games():
     """Возвращает список активных игр (для админки)"""
@@ -1262,4 +1271,3 @@ def get_active_tower_games():
             'chat_id': game.chat_id,
             'message_id': game.message_id
         } for user_id, game in active_tower_games.items()}
-
