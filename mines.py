@@ -1,11 +1,15 @@
-import telebot
-from telebot import types
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 import random
 import json
 import time
 import threading
 import logging
 import hashlib
+import asyncio
 from contextlib import contextmanager
 
 import referrals
@@ -143,7 +147,7 @@ MAX_BET = float('inf')
 
 GAME_TIMEOUT = 300
 
-def cleanup_inactive_games():
+def cleanup_inactive_games(bot: Bot):
     """Очистка неактивных игр и возврат ставок"""
     current_time = time.time()
     games_to_remove = []
@@ -181,13 +185,14 @@ def cleanup_inactive_games():
 
 <i>Ваша ставка возвращена на баланс! ✅</i>
 """
-                    bot.edit_message_text(
-                        timeout_message,
-                        game.chat_id,
-                        game.message_id,
-                        parse_mode='HTML'
+                    asyncio.create_task(
+                        bot.edit_message_text(
+                            timeout_message,
+                            game.chat_id,
+                            game.message_id,
+                            parse_mode='HTML'
+                        )
                     )
-                    time.sleep(3)
                 except Exception as e:
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения игры {user_id}: {e}")
@@ -212,12 +217,12 @@ def cleanup_inactive_games():
         except Exception as e:
             logging.error(f"Ошибка при удалении неактивной игры пользователя {user_id}: {e}")
 
-def start_cleanup_thread():
+def start_cleanup_thread(bot: Bot):
     """Запускает поток для периодической очистки неактивных игр"""
     def cleanup_worker():
         while True:
             try:
-                cleanup_inactive_games()
+                asyncio.run(cleanup_inactive_games(bot))
                 time.sleep(60)
             except Exception as e:
                 logging.error(f"Ошибка в cleanup_worker: {e}")
@@ -263,34 +268,34 @@ def clear_action_processing(user_id, action_key=""):
 
 def get_bet_selection_keyboard():
     """Клавиатура выбора ставки с новыми значениями"""
-    markup = types.InlineKeyboardMarkup(row_width=5)
     bets = ["25", "50", "125", "250", "500"]
-    buttons = [types.InlineKeyboardButton(f"{bet}₽", callback_data=f"mine_bet_{bet}") for bet in bets]
-    markup.row(*buttons)
-    markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="mine_custom_bet"))
+    buttons = [InlineKeyboardButton(text=f"{bet}₽", callback_data=f"mine_bet_{bet}") for bet in bets]
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        buttons,
+        [InlineKeyboardButton(text="📝 Ввести вручную", callback_data="mine_custom_bet")]
+    ])
     return markup
 
 def get_mines_selection_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=5)
     mines_counts = ["2", "5", "10", "15", "18"]
-    buttons = [types.InlineKeyboardButton(f"{count}", callback_data=f"mine_count_{count}") for count in mines_counts]
-    markup.row(*buttons)
-    markup.row(types.InlineKeyboardButton("📝 Ввести вручную", callback_data="mine_custom_count"))
+    buttons = [InlineKeyboardButton(text=f"{count}", callback_data=f"mine_count_{count}") for count in mines_counts]
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        buttons,
+        [InlineKeyboardButton(text="📝 Ввести вручную", callback_data="mine_custom_count")]
+    ])
     return markup
 
 def get_game_keyboard(game, game_over=False):
-    markup = types.InlineKeyboardMarkup(row_width=5)
-
     buttons = []
+
     for i in range(game.grid_size):
         row_buttons = []
         for j in range(game.grid_size):
             if game_over:
                 if (i, j) in game.mines_positions:
-                    if game.revealed[i][j]:
-                        emoji = "💢"
-                    else:
-                        emoji = "💢"
+                    emoji = "💢"
                 elif game.revealed[i][j]:
                     emoji = "💎"
                 else:
@@ -307,23 +312,16 @@ def get_game_keyboard(game, game_over=False):
                     emoji = "◽️"
                     callback_data = f"mine_cell_{i}_{j}"
 
-            button = types.InlineKeyboardButton(
-                emoji,
-                callback_data=callback_data
-            )
-            row_buttons.append(button)
+            row_buttons.append(InlineKeyboardButton(text=emoji, callback_data=callback_data))
         buttons.append(row_buttons)
 
-    for row in buttons:
-        markup.row(*row)
-
     if not game_over and game.opened_cells > 0:
-        markup.row(types.InlineKeyboardButton(
-            f"💰 ЗАБРАТЬ {round(game.bet_amount * game.multiplier, 2)}₽",
+        buttons.append([InlineKeyboardButton(
+            text=f"💰 ЗАБРАТЬ {round(game.bet_amount * game.multiplier, 2)}₽",
             callback_data="mine_cashout"
-        ))
+        )])
 
-    return markup
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def format_game_info(game):
     """Форматирует информацию об игре в красивый вид"""
@@ -406,9 +404,14 @@ def format_game_result(game, win_amount, is_win=False):
 <i>Не повезло в этот раз! Попробуйте еще! 💪</i>
 """
 
-bot = None
+bot: Bot = None
+dp: Dispatcher = None
 
-def cancel_user_game(user_id, notify_user=True):
+class MinesStates(StatesGroup):
+    waiting_for_custom_bet = State()
+    waiting_for_custom_count = State()
+
+async def cancel_user_game(user_id: str, notify_user: bool = True):
     """Принудительно отменяет игру пользователя и возвращает ставку"""
     try:
         with mines_lock:
@@ -423,7 +426,7 @@ def cancel_user_game(user_id, notify_user=True):
                 save_users_data(users_data)
                 logging.info(f"Принудительно возвращена ставка {game.bet_amount} пользователю {user_id}")
             
-            if notify_user and game.chat_id and game.message_id:
+            if notify_user and game.chat_id and game.message_id and bot:
                 try:
                     cancel_message = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -441,7 +444,7 @@ def cancel_user_game(user_id, notify_user=True):
 
 <i>Ваша ставка возвращена на баланс! ✅</i>
 """
-                    bot.edit_message_text(
+                    await bot.edit_message_text(
                         cancel_message,
                         game.chat_id,
                         game.message_id,
@@ -451,7 +454,7 @@ def cancel_user_game(user_id, notify_user=True):
                     if "message is not modified" not in str(e) and "message to edit not found" not in str(e):
                         logging.error(f"Ошибка при редактировании сообщения отмены {user_id}: {e}")
                         try:
-                            bot.send_message(game.chat_id, cancel_message, parse_mode='HTML')
+                            await bot.send_message(game.chat_id, cancel_message, parse_mode='HTML')
                         except:
                             pass
             
@@ -474,12 +477,12 @@ def cancel_user_game(user_id, notify_user=True):
         logging.error(f"Ошибка при отмене игры пользователя {user_id}: {e}")
         return False
 
-def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None, chat_id=None, message_id=None):
+async def start_mines_game_from_command(user_id: str, mines_count: int, bet_amount: float, message: Message = None, chat_id: int = None, message_id: int = None):
     """Функция для запуска игры через команду"""
     try:
         if not rate_limit_mines(user_id):
             if message:
-                bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
+                await message.answer("❌ Слишком быстро! Подождите 0.3 секунды.")
             return False
 
         with mines_lock:
@@ -487,20 +490,20 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
                 game = active_games[user_id]
                 current_time = time.time()
                 if current_time - game.created_time > GAME_TIMEOUT:
-                    cancel_user_game(user_id)
+                    await cancel_user_game(user_id)
                 else:
                     if message:
-                        bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
+                        await message.answer("❌ У вас уже есть активная игра!")
                     return False
 
         if mines_count < 2 or mines_count > 24:
             if message:
-                bot.send_message(message.chat.id, "❌ Количество мин должно быть от 2 до 24!")
+                await message.answer("❌ Количество мин должно быть от 2 до 24!")
             return False
 
         if bet_amount < MIN_BET:
             if message:
-                bot.send_message(message.chat.id, f"❌ Минимальная ставка: {MIN_BET}₽")
+                await message.answer(f"❌ Минимальная ставка: {MIN_BET}₽")
             return False
 
         users_data = load_users_data()
@@ -512,7 +515,7 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
         balance = users_data[user_id].get('balance', 0)
         if bet_amount > balance:
             if message:
-                bot.send_message(message.chat.id, "❌ Недостаточно средств!")
+                await message.answer("❌ Недостаточно средств!")
             return False
 
         if message:
@@ -529,16 +532,15 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
         save_users_data(users_data)
 
         if message:
-            sent_message = bot.send_message(
-                message.chat.id,
+            sent_message = await message.answer(
                 format_game_info(game),
                 parse_mode='HTML',
                 reply_markup=get_game_keyboard(game)
             )
             game.message_id = sent_message.message_id
-        elif chat_id and message_id:
+        elif chat_id and message_id and bot:
             try:
-                bot.edit_message_text(
+                await bot.edit_message_text(
                     format_game_info(game),
                     chat_id,
                     message_id,
@@ -549,15 +551,15 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
             except Exception as e:
                 if "message is not modified" not in str(e):
                     logging.error(f"Ошибка edit_message_text при запуске игры: {e}")
-                    sent_message = bot.send_message(
+                    sent_message = await bot.send_message(
                         chat_id,
                         format_game_info(game),
                         parse_mode='HTML',
                         reply_markup=get_game_keyboard(game)
                     )
                     game.message_id = sent_message.message_id
-        elif chat_id:
-            sent_message = bot.send_message(
+        elif chat_id and bot:
+            sent_message = await bot.send_message(
                 chat_id,
                 format_game_info(game),
                 parse_mode='HTML',
@@ -569,7 +571,7 @@ def start_mines_game_from_command(user_id, mines_count, bet_amount, message=None
     except Exception as e:
         logging.error(f"Ошибка в start_mines_game_from_command: {e}")
         if message:
-            bot.send_message(message.chat.id, "❌ Произошла ошибка при запуске игры!")
+            await message.answer("❌ Произошла ошибка при запуске игры!")
         return False
 
 def parse_mines_command(text):
@@ -609,18 +611,15 @@ def parse_mines_command(text):
         logging.error(f"Ошибка при парсинге команды: {e}")
         return None, None
 
-def register_mines_handlers(bot_instance):
-    global bot
+def register_mines_handlers(dp_instance: Dispatcher, bot_instance: Bot):
+    global dp, bot
+    dp = dp_instance
     bot = bot_instance
     
-    start_cleanup_thread()
+    start_cleanup_thread(bot)
 
-    @bot.message_handler(func=lambda message: message.text and 
-                        (message.text.lower().startswith('/мины') or 
-                         message.text.lower().startswith('/mines') or
-                         message.text.lower().startswith('мины ') or
-                         message.text.lower().startswith('mines ')))
-    def mines_command_handler(message):
+    @dp.message(F.text.regexp(r'^(/мины|/mines|мины |mines )'))
+    async def mines_command_handler(message: Message):
         user_id = str(message.from_user.id)
         
         mines_count, bet_amount = parse_mines_command(message.text)
@@ -646,112 +645,17 @@ def register_mines_handlers(bot_instance):
 • Минимальная ставка: 10₽
 • Игра автоматически закрывается через 5 минут бездействия (ставка возвращается)
 </blockquote>"""
-            bot.send_message(message.chat.id, help_text, parse_mode='HTML')
+            await message.answer(help_text, parse_mode='HTML')
             return
         
-        start_mines_game_from_command(user_id, mines_count, bet_amount, message=message)
+        await start_mines_game_from_command(user_id, mines_count, bet_amount, message=message)
 
-    def process_custom_bet(message):
-        try:
-            user_id = str(message.from_user.id)
-
-            bet_amount = float(message.text)
-
-            if bet_amount < MIN_BET:
-                bot.send_message(message.chat.id, f"❌ Минимальная ставка: {MIN_BET}₽")
-                return
-
-            if bet_amount > MAX_BET:
-                bot.send_message(message.chat.id, f"❌ Максимальная ставка: {MAX_BET}₽")
-                return
-
-            users_data = load_users_data()
-            
-            if user_id not in users_data:
-                users_data[user_id] = {'balance': 0}
-
-            balance = users_data[user_id].get('balance', 0)
-            if bet_amount > balance:
-                bot.send_message(message.chat.id, "❌ Недостаточно средств!")
-                return
-
-            with mines_lock:
-                user_temp_data[user_id] = {'bet_amount': bet_amount}
-
-            bot.send_message(
-                message.chat.id,
-                """<blockquote expandable>╔══════════════════════╗
-   💣 <b>ИГРА МИНЫ</b> 💣
-╚══════════════════════╝</blockquote>
-
-<blockquote>
-Выберите количество мин (2-24):
-</blockquote>""",
-                parse_mode='HTML',
-                reply_markup=get_mines_selection_keyboard()
-            )
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите корректную сумму!")
-        except Exception as e:
-            logging.error(f"Ошибка в process_custom_bet: {e}")
-            bot.send_message(message.chat.id, "❌ Произошла ошибка!")
-
-    def process_custom_mines(message):
-        try:
-            user_id = str(message.from_user.id)
-
-            mines_count = int(message.text)
-            if not 2 <= mines_count <= 24:
-                bot.send_message(message.chat.id, "❌ Введите число от 2 до 24!")
-                return
-
-            users_data = load_users_data()
-
-            with mines_lock:
-                if user_id in active_games:
-                    game = active_games[user_id]
-                    current_time = time.time()
-                    if current_time - game.created_time > GAME_TIMEOUT:
-                        cancel_user_game(user_id)
-                    else:
-                        bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
-                        return
-
-                if user_id not in user_temp_data or 'bet_amount' not in user_temp_data[user_id]:
-                    bot.send_message(message.chat.id, "❌ Ошибка данных! Начните заново.")
-                    return
-
-                bet_amount = user_temp_data[user_id]['bet_amount']
-
-            balance = users_data[user_id].get('balance', 0)
-            if bet_amount > balance:
-                bot.send_message(message.chat.id, "❌ Недостаточно средств!")
-                return
-
-            success = start_mines_game_from_command(
-                user_id=user_id,
-                mines_count=mines_count,
-                bet_amount=bet_amount,
-                message=message
-            )
-
-            if success:
-                with mines_lock:
-                    if user_id in user_temp_data:
-                        del user_temp_data[user_id]
-
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Введите корректное число!")
-        except Exception as e:
-            logging.error(f"Ошибка в process_custom_mines: {e}")
-            bot.send_message(message.chat.id, "❌ Произошла ошибка!")
-
-    @bot.message_handler(func=lambda message: message.text in ["💣 Мины", "мины", "Mines"])
-    def mines_start_internal(message):
+    @dp.message(F.text == "💣 Мины")
+    async def mines_start(message: Message):
         user_id = str(message.from_user.id)
 
         if not rate_limit_mines(user_id):
-            bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
+            await message.answer("❌ Слишком быстро! Подождите 0.3 секунды.")
             return
 
         with mines_lock:
@@ -759,9 +663,9 @@ def register_mines_handlers(bot_instance):
                 game = active_games[user_id]
                 current_time = time.time()
                 if current_time - game.created_time > GAME_TIMEOUT:
-                    cancel_user_game(user_id)
+                    await cancel_user_game(user_id)
                 else:
-                    bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
+                    await message.answer("❌ У вас уже есть активная игра!")
                     return
 
         users_data = load_users_data()
@@ -773,8 +677,7 @@ def register_mines_handlers(bot_instance):
         balance = users_data[user_id].get('balance', 0)
         balance_rounded = round(balance, 2)
 
-        bot.send_message(
-            message.chat.id,
+        await message.answer(
             f"""<blockquote expandable>╔══════════════════════╗
    💣 <b>ИГРА МИНЫ</b> 💣
 ╚══════════════════════╝</blockquote>
@@ -788,12 +691,119 @@ def register_mines_handlers(bot_instance):
             reply_markup=get_bet_selection_keyboard()
         )
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('mine_'))
-    def mines_callback_handler(call):
+    async def process_custom_bet(message: Message, state: FSMContext):
+        try:
+            user_id = str(message.from_user.id)
+
+            bet_amount = float(message.text)
+
+            if bet_amount < MIN_BET:
+                await message.answer(f"❌ Минимальная ставка: {MIN_BET}₽")
+                await state.clear()
+                return
+
+            if bet_amount > MAX_BET:
+                await message.answer(f"❌ Максимальная ставка: {MAX_BET}₽")
+                await state.clear()
+                return
+
+            users_data = load_users_data()
+            
+            if user_id not in users_data:
+                users_data[user_id] = {'balance': 0}
+
+            balance = users_data[user_id].get('balance', 0)
+            if bet_amount > balance:
+                await message.answer("❌ Недостаточно средств!")
+                await state.clear()
+                return
+
+            with mines_lock:
+                user_temp_data[user_id] = {'bet_amount': bet_amount}
+
+            await message.answer(
+                """<blockquote expandable>╔══════════════════════╗
+   💣 <b>ИГРА МИНЫ</b> 💣
+╚══════════════════════╝</blockquote>
+
+<blockquote>
+Выберите количество мин (2-24):
+</blockquote>""",
+                parse_mode='HTML',
+                reply_markup=get_mines_selection_keyboard()
+            )
+            await state.clear()
+        except ValueError:
+            await message.answer("❌ Введите корректную сумму!")
+            await state.clear()
+        except Exception as e:
+            logging.error(f"Ошибка в process_custom_bet: {e}")
+            await message.answer("❌ Произошла ошибка!")
+            await state.clear()
+
+    async def process_custom_mines(message: Message, state: FSMContext):
+        try:
+            user_id = str(message.from_user.id)
+
+            mines_count = int(message.text)
+            if not 2 <= mines_count <= 24:
+                await message.answer("❌ Введите число от 2 до 24!")
+                await state.clear()
+                return
+
+            users_data = load_users_data()
+
+            with mines_lock:
+                if user_id in active_games:
+                    game = active_games[user_id]
+                    current_time = time.time()
+                    if current_time - game.created_time > GAME_TIMEOUT:
+                        await cancel_user_game(user_id)
+                    else:
+                        await message.answer("❌ У вас уже есть активная игра!")
+                        await state.clear()
+                        return
+
+                if user_id not in user_temp_data or 'bet_amount' not in user_temp_data[user_id]:
+                    await message.answer("❌ Ошибка данных! Начните заново.")
+                    await state.clear()
+                    return
+
+                bet_amount = user_temp_data[user_id]['bet_amount']
+
+            balance = users_data[user_id].get('balance', 0)
+            if bet_amount > balance:
+                await message.answer("❌ Недостаточно средств!")
+                await state.clear()
+                return
+
+            success = await start_mines_game_from_command(
+                user_id=user_id,
+                mines_count=mines_count,
+                bet_amount=bet_amount,
+                message=message
+            )
+
+            if success:
+                with mines_lock:
+                    if user_id in user_temp_data:
+                        del user_temp_data[user_id]
+
+            await state.clear()
+
+        except ValueError:
+            await message.answer("❌ Введите корректное число!")
+            await state.clear()
+        except Exception as e:
+            logging.error(f"Ошибка в process_custom_mines: {e}")
+            await message.answer("❌ Произошла ошибка!")
+            await state.clear()
+
+    @dp.callback_query(F.data.startswith('mine_'))
+    async def mines_callback_handler(call: CallbackQuery, state: FSMContext):
         try:
             user_id = str(call.from_user.id)
 
-            
             action_key = ""
             if call.data.startswith("mine_cell_"):
                 parts = call.data.split("_")
@@ -812,7 +822,7 @@ def register_mines_handlers(bot_instance):
 
             if is_action_processing(user_id, action_key):
                 try:
-                    bot.answer_callback_query(call.id, "⏳ Действие уже обрабатывается...", show_alert=False)
+                    await call.answer("⏳ Действие уже обрабатывается...", show_alert=False)
                 except:
                     pass
                 return
@@ -825,10 +835,10 @@ def register_mines_handlers(bot_instance):
                         game = active_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            cancel_user_game(user_id)
+                            await cancel_user_game(user_id)
                         else:
                             try:
-                                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                                await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                             except:
                                 pass
                             clear_action_processing(user_id, action_key)
@@ -840,7 +850,7 @@ def register_mines_handlers(bot_instance):
                 balance = users_data[user_id].get('balance', 0)
                 if bet_amount > balance:
                     try:
-                        bot.answer_callback_query(call.id, "❌ Недостаточно средств!")
+                        await call.answer("❌ Недостаточно средств!")
                     except:
                         pass
                     clear_action_processing(user_id, action_key)
@@ -850,7 +860,7 @@ def register_mines_handlers(bot_instance):
                     user_temp_data[user_id] = {'bet_amount': bet_amount}
 
                 try:
-                    bot.edit_message_text(
+                    await call.message.edit_text(
                         """<blockquote expandable>╔══════════════════════╗
    💣 <b>ИГРА МИНЫ</b> 💣
 ╚══════════════════════╝</blockquote>
@@ -858,8 +868,6 @@ def register_mines_handlers(bot_instance):
 <blockquote>
 Выберите количество мин (2-24):
 </blockquote>""",
-                        call.message.chat.id,
-                        call.message.message_id,
                         parse_mode='HTML',
                         reply_markup=get_mines_selection_keyboard()
                     )
@@ -878,10 +886,10 @@ def register_mines_handlers(bot_instance):
                         game = active_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            cancel_user_game(user_id)
+                            await cancel_user_game(user_id)
                         else:
                             try:
-                                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                                await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                             except:
                                 pass
                             clear_action_processing(user_id, action_key)
@@ -889,7 +897,7 @@ def register_mines_handlers(bot_instance):
 
                     if user_id not in user_temp_data or 'bet_amount' not in user_temp_data[user_id]:
                         try:
-                            bot.answer_callback_query(call.id, "❌ Ошибка данных!")
+                            await call.answer("❌ Ошибка данных!")
                         except:
                             pass
                         clear_action_processing(user_id, action_key)
@@ -901,13 +909,13 @@ def register_mines_handlers(bot_instance):
                 balance = users_data[user_id].get('balance', 0)
                 if bet_amount > balance:
                     try:
-                        bot.answer_callback_query(call.id, "❌ Недостаточно средств!")
+                        await call.answer("❌ Недостаточно средств!")
                     except:
                         pass
                     clear_action_processing(user_id, action_key)
                     return
 
-                success = start_mines_game_from_command(
+                success = await start_mines_game_from_command(
                     user_id=user_id,
                     mines_count=mines_count,
                     bet_amount=bet_amount,
@@ -929,18 +937,17 @@ def register_mines_handlers(bot_instance):
                         game = active_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            cancel_user_game(user_id)
+                            await cancel_user_game(user_id)
                         else:
                             try:
-                                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                                await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                             except:
                                 pass
                             clear_action_processing(user_id, action_key)
                             return
 
                 try:
-                    bot.send_message(
-                        call.message.chat.id,
+                    await call.message.answer(
                         """<blockquote expandable>╔══════════════════════╗
    📝 <b>ВВОД СТАВКИ</b> 📝
 ╚══════════════════════╝</blockquote>
@@ -950,15 +957,9 @@ def register_mines_handlers(bot_instance):
 </blockquote>""",
                         parse_mode='HTML'
                     )
+                    await state.set_state(MinesStates.waiting_for_custom_bet)
                 except Exception as e:
                     logging.error(f"Ошибка отправки сообщения mine_custom_bet: {e}")
-                    clear_action_processing(user_id, action_key)
-                    return
-                
-                try:
-                    bot.register_next_step_handler(call.message, process_custom_bet)
-                except Exception as e:
-                    logging.error(f"Ошибка register_next_step_handler: {e}")
                 finally:
                     clear_action_processing(user_id, action_key)
                 return
@@ -969,18 +970,17 @@ def register_mines_handlers(bot_instance):
                         game = active_games[user_id]
                         current_time = time.time()
                         if current_time - game.created_time > GAME_TIMEOUT:
-                            cancel_user_game(user_id)
+                            await cancel_user_game(user_id)
                         else:
                             try:
-                                bot.answer_callback_query(call.id, "❌ У вас уже есть активная игра!", show_alert=True)
+                                await call.answer("❌ У вас уже есть активная игра!", show_alert=True)
                             except:
                                 pass
                             clear_action_processing(user_id, action_key)
                             return
 
                 try:
-                    bot.send_message(
-                        call.message.chat.id,
+                    await call.message.answer(
                         """<blockquote expandable>╔══════════════════════╗
    📝 <b>ВВОД КОЛИЧЕСТВА МИН</b> 📝
 ╚══════════════════════╝</blockquote>
@@ -990,15 +990,9 @@ def register_mines_handlers(bot_instance):
 </blockquote>""",
                         parse_mode='HTML'
                     )
+                    await state.set_state(MinesStates.waiting_for_custom_count)
                 except Exception as e:
                     logging.error(f"Ошибка отправки сообщения mine_custom_count: {e}")
-                    clear_action_processing(user_id, action_key)
-                    return
-                
-                try:
-                    bot.register_next_step_handler(call.message, process_custom_mines)
-                except Exception as e:
-                    logging.error(f"Ошибка register_next_step_handler: {e}")
                 finally:
                     clear_action_processing(user_id, action_key)
                 return
@@ -1006,7 +1000,7 @@ def register_mines_handlers(bot_instance):
             with mines_lock:
                 if user_id not in active_games:
                     try:
-                        bot.answer_callback_query(call.id, "❌ Игра не найдена")
+                        await call.answer("❌ Игра не найдена")
                     except:
                         pass
                     clear_action_processing(user_id, action_key)
@@ -1016,7 +1010,7 @@ def register_mines_handlers(bot_instance):
 
             if not game.game_active:
                 try:
-                    bot.answer_callback_query(call.id, "❌ Игра уже завершена!")
+                    await call.answer("❌ Игра уже завершена!")
                 except:
                     pass
                 clear_action_processing(user_id, action_key)
@@ -1028,7 +1022,7 @@ def register_mines_handlers(bot_instance):
 
                 if game.revealed[x][y]:
                     try:
-                        bot.answer_callback_query(call.id, "❌ Уже открыто!")
+                        await call.answer("❌ Уже открыто!")
                     except:
                         pass
                     clear_action_processing(user_id, action_key)
@@ -1038,7 +1032,7 @@ def register_mines_handlers(bot_instance):
                     current_time = time.time()
                     if current_time - game.last_action_time < 0.3:
                         try:
-                            bot.answer_callback_query(call.id, "⏳ Подождите немного...", show_alert=False)
+                            await call.answer("⏳ Подождите немного...", show_alert=False)
                         except:
                             pass
                         clear_action_processing(user_id, action_key)
@@ -1069,10 +1063,8 @@ def register_mines_handlers(bot_instance):
                                 del active_games[user_id]
 
                         try:
-                            bot.edit_message_text(
+                            await call.message.edit_text(
                                 format_game_result(game, 0, False),
-                                call.message.chat.id,
-                                call.message.message_id,
                                 parse_mode='HTML',
                                 reply_markup=get_game_keyboard(game, game_over=True)
                             )
@@ -1084,10 +1076,8 @@ def register_mines_handlers(bot_instance):
                         return
                     else:
                         try:
-                            bot.edit_message_text(
+                            await call.message.edit_text(
                                 format_game_info(game),
-                                call.message.chat.id,
-                                call.message.message_id,
                                 parse_mode='HTML',
                                 reply_markup=get_game_keyboard(game)
                             )
@@ -1103,7 +1093,7 @@ def register_mines_handlers(bot_instance):
                     current_time = time.time()
                     if current_time - game.last_action_time < 0.3:
                         try:
-                            bot.answer_callback_query(call.id, "⏳ Подождите немного...", show_alert=False)
+                            await call.answer("⏳ Подождите немного...", show_alert=False)
                         except:
                             pass
                         clear_action_processing(user_id, action_key)
@@ -1113,7 +1103,7 @@ def register_mines_handlers(bot_instance):
                     
                     if not game.game_active:
                         try:
-                            bot.answer_callback_query(call.id, "❌ Игра уже завершена!")
+                            await call.answer("❌ Игра уже завершена!")
                         except:
                             pass
                         clear_action_processing(user_id, action_key)
@@ -1148,10 +1138,8 @@ def register_mines_handlers(bot_instance):
                             del active_games[user_id]
 
                     try:
-                        bot.edit_message_text(
+                        await call.message.edit_text(
                             format_game_result(game, win_amount, True),
-                            call.message.chat.id,
-                            call.message.message_id,
                             parse_mode='HTML',
                             reply_markup=get_game_keyboard(game, game_over=True)
                         )
@@ -1164,7 +1152,7 @@ def register_mines_handlers(bot_instance):
 
             elif call.data == "mine_ignore":
                 try:
-                    bot.answer_callback_query(call.id)
+                    await call.answer()
                 except:
                     pass
                 finally:
@@ -1179,17 +1167,27 @@ def register_mines_handlers(bot_instance):
             else:
                 logging.error(f"Ошибка в mines_callback_handler: {e}")
                 try:
-                    bot.answer_callback_query(call.id, "❌ Произошла ошибка!")
+                    await call.answer("❌ Произошла ошибка!")
                 except:
                     pass
             clear_action_processing(user_id, action_key if 'action_key' in locals() else "")
 
-def mines_start(message):
+    @dp.message(MinesStates.waiting_for_custom_bet)
+    async def handle_custom_bet(message: Message, state: FSMContext):
+        await process_custom_bet(message, state)
+
+    @dp.message(MinesStates.waiting_for_custom_count)
+    async def handle_custom_count(message: Message, state: FSMContext):
+        await process_custom_mines(message, state)
+
+    print("✅ Mines handlers registered")
+
+async def mines_start(message: Message):
     """Функция для запуска игры Мины из внешних модулей"""
     user_id = str(message.from_user.id)
 
     if not rate_limit_mines(user_id):
-        bot.send_message(message.chat.id, "❌ Слишком быстро! Подождите 0.3 секунды.")
+        await message.answer("❌ Слишком быстро! Подождите 0.3 секунды.")
         return
 
     with mines_lock:
@@ -1197,9 +1195,9 @@ def mines_start(message):
             game = active_games[user_id]
             current_time = time.time()
             if current_time - game.created_time > GAME_TIMEOUT:
-                cancel_user_game(user_id)
+                await cancel_user_game(user_id)
             else:
-                bot.send_message(message.chat.id, "❌ У вас уже есть активная игра!")
+                await message.answer("❌ У вас уже есть активная игра!")
                 return
 
     users_data = load_users_data()
@@ -1211,8 +1209,7 @@ def mines_start(message):
     balance = users_data[user_id].get('balance', 0)
     balance_rounded = round(balance, 2)
 
-    bot.send_message(
-        message.chat.id,
+    await message.answer(
         f"""<blockquote expandable>╔══════════════════════╗
    💣 <b>ИГРА МИНЫ</b> 💣
 ╚══════════════════════╝</blockquote>
@@ -1225,10 +1222,6 @@ def mines_start(message):
         parse_mode='HTML',
         reply_markup=get_bet_selection_keyboard()
     )
-
-def cancel_game(user_id):
-    """Внешняя функция для отмены игры пользователя"""
-    return cancel_user_game(str(user_id))
 
 def get_active_games():
     """Возвращает список активных игр (для админки)"""
@@ -1243,5 +1236,3 @@ def get_active_games():
             'chat_id': game.chat_id,
             'message_id': game.message_id
         } for user_id, game in active_games.items()}
-
-
