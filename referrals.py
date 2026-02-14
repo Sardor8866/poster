@@ -1,10 +1,13 @@
-import telebot
-from telebot import types
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 import json
 from datetime import datetime
-import telebot.apihelper
 import logging
 import time
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,22 +51,24 @@ def save_users_data(data):
         return False
 
 BOT_USERNAME = None
-bot = None
+bot: Bot = None
+dp: Dispatcher = None
 
-def register_referrals_handlers(bot_instance):
-    global bot, BOT_USERNAME
+def register_referrals_handlers(dp_instance: Dispatcher, bot_instance: Bot):
+    global bot, dp, BOT_USERNAME
     bot = bot_instance
+    dp = dp_instance
 
-    try:
-        bot_info = bot.get_me()
-        BOT_USERNAME = bot_info.username
-        logger.info(f"Получили username бота: @{BOT_USERNAME}")
-    except Exception as e:
-        logger.error(f"Ошибка получения username бота: {e}")
-        BOT_USERNAME = "YOUR_BOT_USERNAME"
+    async def get_bot_username():
+        try:
+            bot_info = await bot.get_me()
+            return bot_info.username
+        except Exception as e:
+            logger.error(f"Ошибка получения username бота: {e}")
+            return "YOUR_BOT_USERNAME"
 
-    @bot.callback_query_handler(func=lambda call: call.data == "referral_system")
-    def show_referral_system(call):
+    @dp.callback_query(F.data == "referral_system")
+    async def show_referral_system(call: CallbackQuery):
         try:
             user_id = str(call.from_user.id)
             
@@ -71,20 +76,20 @@ def register_referrals_handlers(bot_instance):
             allowed, message = check_click_cooldown(user_id)
             if not allowed:
                 try:
-                    bot.answer_callback_query(call.id, message)
+                    await call.answer(message)
                 except:
                     pass
                 return
             
             try:
-                bot.answer_callback_query(call.id)
+                await call.answer()
             except:
                 pass
 
             users_data = load_users_data()
 
             if user_id not in users_data:
-                bot.answer_callback_query(call.id, "❌ Сначала зарегистрируйтесь через /start")
+                await call.answer("❌ Сначала зарегистрируйтесь через /start")
                 return
 
             user_info = users_data[user_id]
@@ -93,19 +98,21 @@ def register_referrals_handlers(bot_instance):
             referral_bonus_balance = user_info.get('referral_bonus', 0)
             total_referral_income = user_info.get('total_referral_income', 0)
 
-            referral_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+            global BOT_USERNAME
+            if not BOT_USERNAME:
+                BOT_USERNAME = await get_bot_username()
 
-            markup = types.InlineKeyboardMarkup(row_width=1)
+            referral_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
 
             withdraw_text = "💸 Вывести на баланс"
             if referral_bonus_balance < 300:
                 withdraw_text = f"💸 Вывести на баланс (нужно {300-referral_bonus_balance}₽)"
 
-            markup.add(
-                types.InlineKeyboardButton(withdraw_text, callback_data="withdraw_referral"),
-                types.InlineKeyboardButton("📋 Мои рефералы", callback_data="my_referrals"),
-                types.InlineKeyboardButton("📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}")
-            )
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=withdraw_text, callback_data="withdraw_referral")],
+                [InlineKeyboardButton(text="📋 Мои рефералы", callback_data="my_referrals")],
+                [InlineKeyboardButton(text="📤 Поделиться", switch_inline_query=f"Присоединяйся к игре! 🔥\n{referral_link}")]
+            ])
 
             referral_text = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -136,28 +143,24 @@ def register_referrals_handlers(bot_instance):
 """
 
             try:
-                bot.edit_message_text(
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
+                await call.message.edit_text(
                     text=referral_text,
                     parse_mode='HTML',
                     reply_markup=markup
                 )
-            except telebot.apihelper.ApiTelegramException as e:
+            except Exception as e:
                 if "query is too old" in str(e) or "query ID is invalid" in str(e):
                     return
                 elif "message is not modified" in str(e):
                     pass
                 else:
-                    raise e
-            except Exception as e:
-                logger.error(f"Ошибка редактирования сообщения: {e}")
+                    logger.error(f"Ошибка редактирования сообщения: {e}")
 
         except Exception as e:
             logger.error(f"Ошибка в show_referral_system: {e}")
 
-    @bot.callback_query_handler(func=lambda call: call.data == "withdraw_referral")
-    def withdraw_referral_bonus(call):
+    @dp.callback_query(F.data == "withdraw_referral")
+    async def withdraw_referral_bonus(call: CallbackQuery):
         try:
             user_id = str(call.from_user.id)
             
@@ -165,20 +168,20 @@ def register_referrals_handlers(bot_instance):
             allowed, message = check_click_cooldown(user_id)
             if not allowed:
                 try:
-                    bot.answer_callback_query(call.id, message)
+                    await call.answer(message)
                 except:
                     pass
                 return
             
             try:
-                bot.answer_callback_query(call.id)
+                await call.answer()
             except:
                 pass
 
             users_data = load_users_data()
 
             if user_id not in users_data:
-                bot.answer_callback_query(call.id, "❌ Ошибка! Пользователь не найден")
+                await call.answer("❌ Ошибка! Пользователь не найден")
                 return
 
             user_info = users_data[user_id]
@@ -186,18 +189,18 @@ def register_referrals_handlers(bot_instance):
             current_balance = user_info.get('balance', 0)
 
             if referral_bonus < 300:
-                bot.answer_callback_query(
-                    call.id,
+                await call.answer(
                     f"❌ Минимальная сумма вывода 300₽\nУ вас: {referral_bonus}₽\nНе хватает: {300-referral_bonus}₽",
                     show_alert=True
                 )
                 return
 
-            markup = types.InlineKeyboardMarkup(row_width=2)
-            markup.add(
-                types.InlineKeyboardButton("✅ Да, вывести", callback_data=f"confirm_withdraw_{referral_bonus}"),
-                types.InlineKeyboardButton("❌ Отмена", callback_data="referral_system")
-            )
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да, вывести", callback_data=f"confirm_withdraw_{referral_bonus}"),
+                    InlineKeyboardButton(text="❌ Отмена", callback_data="referral_system")
+                ]
+            ])
 
             confirm_text = f"""
 <blockquote expandable>╔══════════════════════╗
@@ -227,24 +230,22 @@ def register_referrals_handlers(bot_instance):
 """
 
             try:
-                bot.edit_message_text(
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
+                await call.message.edit_text(
                     text=confirm_text,
                     parse_mode='HTML',
                     reply_markup=markup
                 )
-            except telebot.apihelper.ApiTelegramException as e:
+            except Exception as e:
                 if "query is too old" in str(e) or "query ID is invalid" in str(e):
                     return
                 else:
-                    raise e
+                    logger.error(f"Ошибка редактирования сообщения: {e}")
 
         except Exception as e:
             logger.error(f"Ошибка в withdraw_referral_bonus: {e}")
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_withdraw_"))
-    def process_withdraw_confirmation(call):
+    @dp.callback_query(F.data.startswith("confirm_withdraw_"))
+    async def process_withdraw_confirmation(call: CallbackQuery):
         try:
             user_id = str(call.from_user.id)
             
@@ -252,20 +253,20 @@ def register_referrals_handlers(bot_instance):
             allowed, message = check_click_cooldown(user_id, "withdraw_action")
             if not allowed:
                 try:
-                    bot.answer_callback_query(call.id, message)
+                    await call.answer(message)
                 except:
                     pass
                 return
             
             try:
-                bot.answer_callback_query(call.id)
+                await call.answer()
             except:
                 pass
 
             users_data = load_users_data()
 
             if user_id not in users_data:
-                bot.answer_callback_query(call.id, "❌ Ошибка! Пользователь не найден")
+                await call.answer("❌ Ошибка! Пользователь не найден")
                 return
 
             withdraw_amount_str = call.data.split("_")[2]
@@ -279,16 +280,14 @@ def register_referrals_handlers(bot_instance):
 
             # Проверка на изменение суммы (двойной клик)
             if withdraw_amount != referral_bonus:
-                bot.answer_callback_query(
-                    call.id,
+                await call.answer(
                     "❌ Ошибка! Сумма изменилась. Обновите страницу",
                     show_alert=True
                 )
                 return
 
             if referral_bonus < 300:
-                bot.answer_callback_query(
-                    call.id,
+                await call.answer(
                     f"❌ Минимальная сумма вывода 300₽",
                     show_alert=True
                 )
@@ -296,8 +295,7 @@ def register_referrals_handlers(bot_instance):
 
             # Проверка что операция еще не была выполнена
             if referral_bonus == 0:
-                bot.answer_callback_query(
-                    call.id,
+                await call.answer(
                     "❌ Операция уже была выполнена",
                     show_alert=True
                 )
@@ -352,25 +350,23 @@ def register_referrals_handlers(bot_instance):
 <b>✅ Теперь вы можете использовать {old_referral_balance}₽ для ставок!</b>
 """
 
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("👥 В рефералы", callback_data="referral_system"))
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👥 В рефералы", callback_data="referral_system")]
+            ])
 
             try:
-                bot.edit_message_text(
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
+                await call.message.edit_text(
                     text=success_text,
                     parse_mode='HTML',
                     reply_markup=markup
                 )
-            except telebot.apihelper.ApiTelegramException as e:
+            except Exception as e:
                 if "query is too old" in str(e) or "query ID is invalid" in str(e):
                     return
                 else:
-                    raise e
+                    logger.error(f"Ошибка редактирования сообщения: {e}")
 
-            bot.answer_callback_query(
-                call.id,
+            await call.answer(
                 f"✅ Успешно! {old_referral_balance}₽ переведены на основной баланс",
                 show_alert=True
             )
@@ -381,14 +377,13 @@ def register_referrals_handlers(bot_instance):
 
         except Exception as e:
             logger.error(f"Ошибка в process_withdraw_confirmation: {e}")
-            bot.answer_callback_query(
-                call.id,
+            await call.answer(
                 "❌ Произошла ошибка при выводе",
                 show_alert=True
             )
 
-    @bot.callback_query_handler(func=lambda call: call.data == "my_referrals")
-    def show_my_referrals(call):
+    @dp.callback_query(F.data == "my_referrals")
+    async def show_my_referrals(call: CallbackQuery):
         try:
             user_id = str(call.from_user.id)
             
@@ -396,20 +391,20 @@ def register_referrals_handlers(bot_instance):
             allowed, message = check_click_cooldown(user_id)
             if not allowed:
                 try:
-                    bot.answer_callback_query(call.id, message)
+                    await call.answer(message)
                 except:
                     pass
                 return
             
             try:
-                bot.answer_callback_query(call.id)
+                await call.answer()
             except:
                 pass
 
             users_data = load_users_data()
 
             if user_id not in users_data:
-                bot.answer_callback_query(call.id, "❌ Сначала зарегистрируйтесь через /start")
+                await call.answer("❌ Сначала зарегистрируйтесь через /start")
                 return
 
             user_info = users_data[user_id]
@@ -433,22 +428,21 @@ def register_referrals_handlers(bot_instance):
 </blockquote>
 """
 
-                markup = types.InlineKeyboardMarkup()
-                markup.row(types.InlineKeyboardButton("👥 К рефералам", callback_data="referral_system"))
+                markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="👥 К рефералам", callback_data="referral_system")]
+                ])
 
                 try:
-                    bot.edit_message_text(
-                        chat_id=call.message.chat.id,
-                        message_id=call.message.message_id,
+                    await call.message.edit_text(
                         text=no_ref_text,
                         parse_mode='HTML',
                         reply_markup=markup
                     )
-                except telebot.apihelper.ApiTelegramException as e:
+                except Exception as e:
                     if "query is too old" in str(e) or "query ID is invalid" in str(e):
                         return
                     else:
-                        raise e
+                        logger.error(f"Ошибка редактирования сообщения: {e}")
                 return
 
             active_count = 0
@@ -491,37 +485,37 @@ def register_referrals_handlers(bot_instance):
 </blockquote>
 """
 
-            markup = types.InlineKeyboardMarkup()
+            buttons = []
             if referral_bonus >= 300:
-                markup.row(types.InlineKeyboardButton("💸 Вывести на баланс", callback_data="withdraw_referral"))
-            markup.row(types.InlineKeyboardButton("👥 К рефералам", callback_data="referral_system"))
+                buttons.append([InlineKeyboardButton(text="💸 Вывести на баланс", callback_data="withdraw_referral")])
+            buttons.append([InlineKeyboardButton(text="👥 К рефералам", callback_data="referral_system")])
+
+            markup = InlineKeyboardMarkup(inline_keyboard=buttons)
 
             try:
-                bot.edit_message_text(
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
+                await call.message.edit_text(
                     text=stats_text,
                     parse_mode='HTML',
                     reply_markup=markup
                 )
-            except telebot.apihelper.ApiTelegramException as e:
+            except Exception as e:
                 if "query is too old" in str(e) or "query ID is invalid" in str(e):
                     return
                 elif "Can't find end tag" in str(e):
                     simple_text = f"📋 Ваши рефералы: {len(referrals_list)}\n💰 Реферальный баланс: {referral_bonus}₽\n📊 Всего получено: {total_referral_income}₽"
-                    bot.edit_message_text(
-                        chat_id=call.message.chat.id,
-                        message_id=call.message.message_id,
+                    await call.message.edit_text(
                         text=simple_text,
                         reply_markup=markup
                     )
                 else:
-                    raise e
+                    logger.error(f"Ошибка редактирования сообщения: {e}")
             except Exception as e:
                 logger.error(f"Ошибка в show_my_referrals: {e}")
 
         except Exception as e:
             logger.error(f"Ошибка в show_my_referrals: {e}")
+
+    print("✅ Referrals handlers registered")
 
 def add_referral_bonus(user_id, win_amount):
     """
@@ -654,7 +648,7 @@ def process_referral_join(new_user_id, referral_code, user_data=None):
             'referrer_data': None
         }
 
-def send_referral_welcome_message(chat_id, referrer_data):
+async def send_referral_welcome_message(chat_id, referrer_data):
     """
     Отправляет красивое сообщение о приглашении по реферальной ссылке
     ТОЛЬКО ДЛЯ НОВЫХ РЕФЕРАЛОВ
@@ -702,7 +696,7 @@ def send_referral_welcome_message(chat_id, referrer_data):
 </blockquote>
 """
         
-        bot.send_message(
+        await bot.send_message(
             chat_id,
             welcome_text,
             parse_mode='HTML'
@@ -712,7 +706,7 @@ def send_referral_welcome_message(chat_id, referrer_data):
     except Exception as e:
         logger.error(f"Ошибка отправки реферального приветствия: {e}")
 
-def send_referral_notification_to_referrer(referrer_id, new_user_id):
+async def send_referral_notification_to_referrer(referrer_id, new_user_id):
     """
     Отправляет уведомление рефереру о новом реферале (ТОЛЬКО ОДИН РАЗ)
     """
@@ -758,7 +752,7 @@ def send_referral_notification_to_referrer(referrer_id, new_user_id):
 <b>🎯 Бонус:</b> 6% от выигрышей
 """
         
-        bot.send_message(
+        await bot.send_message(
             referrer_id,
             notification_text,
             parse_mode='HTML'
